@@ -4,6 +4,7 @@
 # Deno
 .deno/
 deno.lock
+coverage/
 
 # Environment
 .env
