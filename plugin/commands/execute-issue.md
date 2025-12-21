@@ -4,7 +4,7 @@ description: Implement a task from a GitHub issue
 
 # Execute Issue
 
-Implement a task from a GitHub issue, exploring the codebase fresh and creating a PR.
+Implement a task from a GitHub issue, working on a shared feature branch with a single PR for the spec.
 
 ## Usage
 
@@ -33,7 +33,7 @@ Implement a task from a GitHub issue, exploring the codebase fresh and creating 
 4. Verify `.regent/{spec-name}/` exists locally
    - If not, ask user if they want to proceed anyway
 
-## Phase 2: Branch Setup
+## Phase 2: Feature Branch Setup
 
 1. Ensure working directory is clean:
    ```bash
@@ -46,27 +46,23 @@ Implement a task from a GitHub issue, exploring the codebase fresh and creating 
    git fetch origin
    ```
 
-3. Create and checkout branch from main/master:
+3. Get the default branch name:
    ```bash
-   git checkout -b {spec-name}/task-{N} origin/main
+   gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'
    ```
-   - Or `origin/master` if that's the default branch
 
-4. Link branch to issue (development branch):
+4. Check if feature branch exists and set up accordingly:
    ```bash
-   gh api graphql -f query='
-     mutation {
-       createLinkedBranch(input: {
-         issueId: "{issue-node-id}",
-         name: "{spec-name}/task-{N}",
-         oid: "{current-commit-sha}"
-       }) {
-         linkedBranch { id }
-       }
-     }
-   '
+   if git show-ref --verify --quiet refs/remotes/origin/feature/{spec-name}; then
+     # Feature branch exists - check it out and update
+     git checkout feature/{spec-name}
+     git pull origin feature/{spec-name}
+   else
+     # First task for this spec - create feature branch from default branch
+     git checkout -b feature/{spec-name} origin/{default-branch}
+     git push -u origin feature/{spec-name}
+   fi
    ```
-   - Note: This may fail if the repo doesn't support linked branches; that's okay, continue anyway
 
 ## Phase 3: Explore Codebase (REQUIRED - Use Subagent)
 
@@ -154,7 +150,7 @@ Combine the issue content with codebase exploration into a full task brief.
    {output from Explore subagent}
 
    ---
-   *Branch: {spec-name}/task-{N}*
+   *Branch: feature/{spec-name}*
    *Generated at execution time by Regent*
    ```
 
@@ -229,7 +225,7 @@ If tests fail:
 - Re-run code review if changes were significant
 - Re-run tests
 
-## Phase 8: Mark Complete and Commit
+## Phase 8: Commit and Push
 
 Once verified:
 
@@ -238,73 +234,112 @@ Once verified:
 2. Stage and commit all changes:
    ```bash
    git add -A
-   git commit -m "feat({spec-name}): implement task {N} - {title}
+   git commit -m "feat({spec-name}): task {N} - {title}
 
    {brief summary of changes}
 
    Closes #{issue-number}"
    ```
 
-3. Push the branch:
+3. Push to the feature branch:
    ```bash
-   git push -u origin {spec-name}/task-{N}
+   git push origin feature/{spec-name}
    ```
 
-## Phase 9: Create Pull Request
+## Phase 9: Pull Request Management
 
-1. Create the PR:
+### Check for Existing PR
+
+```bash
+PR_NUMBER=$(gh pr list --head "feature/{spec-name}" --state open --json number --jq '.[0].number')
+```
+
+### If No PR Exists (First Task)
+
+1. Read `tasks.md` to get all tasks for the PR body
+
+2. Create a draft PR:
    ```bash
    gh pr create \
-     --title "Task {N}: {title}" \
+     --title "{Spec Title}" \
      --body "$(cat <<'EOF'
-   ## Summary
+   ## Overview
 
-   {summary of what was implemented}
+   {Brief description from the spec's brainstorm.md or requirements.md}
 
-   ## Changes
+   ## Tasks
 
-   - {file1}: {what changed}
-   - {file2}: {what changed}
+   - [x] Task {N}: {title} (#issue-number)
+   - [ ] Task {N+1}: {title} (#issue-number)
+   - [ ] Task {N+2}: {title} (#issue-number)
+   ...
 
-   ## Testing
+   ## Requirements
 
-   - {test results summary}
-   - All tests passing: {yes/no}
+   See [{spec-name}/requirements.md]({requirements-url})
 
-   ## Requirements Satisfied
+   ## Design
 
-   {list the requirement references from the issue}
+   See [{spec-name}/design.md]({design-url})
 
    ---
-   Closes #{issue-number}
-
-   *Implemented via Regent*
+   *Managed by [Regent](https://github.com/stickystyle/regent)*
    EOF
-   )"
+   )" \
+     --draft
    ```
 
-2. Report to user:
+3. Capture the new PR number for reporting
+
+### If PR Already Exists (Subsequent Tasks)
+
+1. Get current PR body:
+   ```bash
+   gh pr view $PR_NUMBER --json body --jq '.body'
    ```
-   Task {N} complete: {title}
 
-   Branch: {spec-name}/task-{N}
-   PR: {pr-url}
-   Closes: #{issue-number}
+2. Update the task checkbox in the PR body:
+   - Find the line matching `- [ ] Task {N}:`
+   - Replace with `- [x] Task {N}:`
 
-   Changes:
-   - {file1}: {what changed}
-   - {file2}: {what changed}
-
-   Tests: {X passing}
-
-   The PR is ready for review and merge.
+3. Update the PR:
+   ```bash
+   gh pr edit $PR_NUMBER --body "{updated body}"
    ```
+
+4. Add a comment noting completion:
+   ```bash
+   gh pr comment $PR_NUMBER --body "✅ **Task {N} complete**: {title}
+
+   Commit: {commit-sha}
+   Issue: #{issue-number} (will close on merge)"
+   ```
+
+## Phase 10: Report Completion
+
+Report to user:
+```
+Task {N} complete: {title}
+
+Branch: feature/{spec-name}
+Commit: {commit-sha}
+Issue: #{issue-number} (closes on merge)
+PR: {pr-url}
+
+Progress: {X}/{total} tasks complete
+
+{If all tasks complete}:
+All tasks complete! The PR is ready to be marked as "Ready for Review".
+Run: gh pr ready {pr-number}
+```
 
 ## Principles
 
+- **Shared branch**: All tasks for a spec work on `feature/{spec-name}`
+- **Single PR**: One PR per spec, updated as tasks complete
 - **Fresh context**: Codebase is explored at execution time, not planning time
-- **Clean Git workflow**: Branch per task, PR for review
-- **Traceability**: Issue → Branch → PR → Merge
+- **Incremental progress**: Tasks can build on each other without waiting for merges
+- **Traceability**: Issues close automatically when PR merges (via commit messages)
 - **TDD**: Tests first, then implementation
 
 ## If Unclear
