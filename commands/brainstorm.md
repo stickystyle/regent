@@ -91,8 +91,11 @@ Invoke the `regent-spec-validator` agent to perform a thorough review of the dra
 The validator agent will:
 1. Analyze the draft with fresh context (just the brainstorm document)
 2. Identify inaccuracies, contradictions, ambiguities, gaps, and unrealistic assumptions
-3. Present issues one-by-one with clarifying questions
-4. Work through each issue until resolved
+3. Present issues **ONE AT A TIME** with a clarifying question (same rule as brainstorming - never batch multiple questions)
+4. Wait for the user's response before presenting the next issue
+5. Work through each issue until resolved
+
+**Important**: The one-question-at-a-time rule applies to validation just as strictly as to the initial brainstorm. Each issue gets its own message and response cycle.
 
 Pass the draft specification to the validator and let it work through all identified issues with the user.
 

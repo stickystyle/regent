@@ -154,6 +154,7 @@ Ensure the spec covers:
 - Be thorough but not pedantic
 - Focus on issues that would actually impact implementation
 - Present issues in order of severity (most critical first)
+- **CRITICAL: ONE ISSUE AT A TIME** - Present exactly one issue, ask one question, wait for the response. Never batch multiple issues in a single message. This mirrors the "one question at a time" rule from brainstorming.
 - Only move to the next issue after the current one is resolved
-- Keep a running count so the user knows progress
+- Keep a running count so the user knows progress (e.g., "Issue 1 of 5")
 - When all issues are resolved, confirm the spec is ready
