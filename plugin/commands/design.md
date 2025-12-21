@@ -25,172 +25,45 @@ Create the technical architecture and design document from requirements.
 3. Identify:
    - Major system components needed
    - Data flows between components
-   - External integrations
-   - Data models and schemas
-   - Key interfaces and APIs
+   - External integrations and existing infrastructure
+   - Key domain concepts
+   - Integration points with existing systems
 
 ### Phase 2: Draft Design
 
-Create an initial architecture design covering:
+Create a high-level architecture design covering:
 - System components and their responsibilities
 - Component interactions and data flows
-- Interface definitions with code blocks
-- Data models
-- Correctness properties (formal invariants)
+- Key interfaces (signatures, not implementations)
+- Domain models and their relationships
+- Correctness properties (simple invariants)
 - Error handling strategies
-- Testing approaches
+- Testing approach
+
+**Important**: The design should describe WHAT the system does, not HOW to implement it. Implementation details emerge during the planning and execution phases.
 
 ### Phase 3: Clarifying Questions
 
 Ask clarifying questions for technical decisions:
 - "Should we use [option A] or [option B] for [component]?"
-- "What's the expected scale for [feature]?"
+- "What existing infrastructure should we integrate with?"
 - "How should the system handle [failure scenario]?"
 
 Present options with trade-offs when multiple valid approaches exist.
 
 ### Phase 4: Present for Review
 
-Present the complete design document:
+**CRITICAL**: Invoke the `regent-design-writer` agent to format the design document.
 
-```markdown
-# Design Document
+Pass to the agent:
+- The full content of `requirements.md`
+- The full content of `brainstorm.md`
+- Any clarifications gathered in Phase 3
+- Notes about existing infrastructure to integrate with
 
-## Overview
-[High-level summary of the technical approach - 2-3 paragraphs explaining the architecture philosophy and key decisions]
+The agent will return a properly formatted design document. Do NOT generate the design yourself — the agent ensures consistent formatting and appropriate abstraction level.
 
-## Architecture
-
-### System Components
-
-```mermaid
-graph TB
-    subgraph "Component Group"
-        A[Component A] --> B[Component B]
-        B --> C[Component C]
-    end
-    D[External System] --> A
-```
-
-[Explanation of the diagram and component relationships]
-
-### [Component Name] Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant API
-    participant Service
-    participant Database
-
-    User->>API: Request
-    API->>Service: Process
-    Service->>Database: Query
-    Database-->>Service: Result
-    Service-->>API: Response
-    API-->>User: Result
-```
-
-[Explanation of the flow]
-
-## Components and Interfaces
-
-### [ComponentName]
-
-[Description of component responsibility and behavior]
-
-```python
-class ComponentName:
-    """
-    [Docstring explaining the component]
-    """
-
-    def method_name(self, param: ParamType) -> ReturnType:
-        """
-        [Method description]
-
-        Args:
-            param: [Parameter description]
-
-        Returns:
-            [Return value description]
-
-        Raises:
-            [Exception conditions]
-        """
-        ...
-```
-
-### [NextComponent]
-[Continue for all major components...]
-
-## Data Models
-
-### Database Schema
-
-```sql
-CREATE TABLE table_name (
-    id UUID PRIMARY KEY,
-    field_name VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-[Explanation of schema design decisions]
-
-### [ModelName]
-
-```python
-class ModelName(BaseModel):
-    """[Model description]"""
-
-    field: FieldType
-    optional_field: Optional[FieldType] = None
-```
-
-## Correctness Properties
-
-**Property 1: [Property Name]**
-*For any* [condition/input], *the system should* [expected behavior/invariant]
-**Validates:** Requirements 1.1, 1.2
-
-**Property 2: [Property Name]**
-*For any* [condition], *it must hold that* [invariant]
-**Validates:** Requirements 2.1
-
-**Property 3: [Property Name]**
-*If* [precondition], *then* [postcondition]
-**Validates:** Requirements 3.1, 3.2
-
-[Continue for all key properties...]
-
-## Error Handling
-
-### [Error Scenario 1]
-- **Trigger:** [What causes this error]
-- **Detection:** [How the system detects it]
-- **Response:** [How the system responds]
-- **Recovery:** [How to recover/retry]
-
-### [Error Scenario 2]
-[Continue for all significant error scenarios...]
-
-## Testing Strategy
-
-### Unit Testing Approach
-[Strategy for unit tests - what to mock, what to test directly]
-
-### Property-Based Testing Approach
-[Strategy for property tests - which properties to test with Hypothesis]
-
-### Integration Testing
-[Strategy for integration tests - what to test end-to-end]
-
-### Test Coverage Goals
-- Unit tests: [target %]
-- Integration tests: [key flows to cover]
-- Property tests: [which correctness properties]
-```
+Present the design returned by `regent-design-writer` to the user.
 
 Ask: "Does this architecture meet your needs? Any concerns about the design decisions?"
 
@@ -212,8 +85,9 @@ On approval:
 
 ## Important Notes
 
+- Design should be high-level - implementation details come later
 - Every correctness property must reference the requirements it validates
-- Interface code blocks should be actual, implementable signatures
-- Mermaid diagrams should be renderable - test them if unsure
-- Properties should be testable with property-based testing frameworks
-- Consider failure modes for every component interaction
+- Mermaid diagrams should show component relationships, not implementation details
+- Properties should be simple invariant statements (one sentence each)
+- Describe integration with EXISTING infrastructure, don't prescribe new infrastructure
+- Trust the implementer to figure out details during planning/execution
