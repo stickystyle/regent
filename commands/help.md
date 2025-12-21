@@ -6,6 +6,11 @@ description: Display workflow guide and available commands
 
 Display the Regent workflow guide and available commands.
 
+## Process
+
+1. Output the help text below exactly as shown (use a code block for formatting)
+2. Do NOT check project state, git status, or provide context - just show the help
+
 ## Output
 
 ```
