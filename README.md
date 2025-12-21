@@ -168,4 +168,4 @@ Specs are committed to version control:
 
 ## License
 
-MIT
+AGPL
