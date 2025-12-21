@@ -9,8 +9,11 @@ Generate a TDD-ordered implementation task list from the design document.
 ## Prerequisites
 
 1. Check that `.regent/` directory exists
-2. Find the spec to work on (same logic as other commands)
-3. Verify both `requirements.md` and `design.md` exist
+2. Find the spec to work on:
+   - If only one spec directory exists in `.regent/`, use it
+   - If multiple exist, use the most recently modified (check file timestamps)
+   - If ambiguous, ask the user which spec to work on
+3. Verify both `requirements.md` and `design.md` exist in `.regent/{spec-name}/`
    - If not, tell user which phase to complete first
 
 ## Process

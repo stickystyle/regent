@@ -9,8 +9,11 @@ Implement the next incomplete task from the implementation plan.
 ## Prerequisites
 
 1. Check that `.regent/` directory exists
-2. Find the spec to work on (same logic as other commands)
-3. Verify `tasks.md` exists
+2. Find the spec to work on:
+   - If only one spec directory exists in `.regent/`, use it
+   - If multiple exist, use the most recently modified (check file timestamps)
+   - If ambiguous, ask the user which spec to work on
+3. Verify `tasks.md` exists in `.regent/{spec-name}/`
    - If not, tell user to run `/regent:plan` first
 
 ## Process

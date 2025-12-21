@@ -9,8 +9,11 @@ Create the technical architecture and design document from requirements.
 ## Prerequisites
 
 1. Check that `.regent/` directory exists
-2. Find the spec to work on (same logic as /regent:specify)
-3. Verify `requirements.md` exists in the spec directory
+2. Find the spec to work on:
+   - If only one spec directory exists in `.regent/`, use it
+   - If multiple exist, use the most recently modified (check file timestamps)
+   - If ambiguous, ask the user which spec to work on
+3. Verify `requirements.md` exists in `.regent/{spec-name}/`
    - If not, tell user to run `/regent:specify` first
 
 ## Process
