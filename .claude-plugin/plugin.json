@@ -1,0 +1,10 @@
+{
+  "name": "regent",
+  "version": "1.0.0",
+  "description": "Spec-driven development workflow for Claude Code",
+  "author": {
+    "name": "Ryan Parrish"
+  },
+  "license": "MIT",
+  "keywords": ["spec-driven", "tdd", "workflow", "development"]
+}
