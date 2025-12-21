@@ -1,1 +1,5 @@
-{}
+{
+  "slackbot/manifest.ts": "Slack app manifest defining the Regent Slack Bot configuration. Specifies app name, scopes, workflows, and bot user settings.",
+  "slackbot/src/mod.ts": "Main module entry point for slackbot implementation code. Re-exports public APIs from submodules as they are implemented.",
+  "slackbot/tests/example_test.ts": "Example test file demonstrating Deno test runner configuration. Verifies testing infrastructure is working correctly."
+}
