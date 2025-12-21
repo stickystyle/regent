@@ -1,0 +1,10 @@
+# Slack CLI
+.slack/
+
+# Deno
+.deno/
+deno.lock
+
+# Environment
+.env
+.env.local

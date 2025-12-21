@@ -4,18 +4,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Regent is a Claude Code plugin that provides spec-driven development workflow. It guides users from idea to implementation through structured phases, with specialized agents ensuring quality at each step.
+Regent is a monorepo containing:
+1. **plugin/** - A Claude Code plugin for spec-driven development workflow
+2. **slackbot/** - A Slack bot that enables collaborative spec development in Slack
 
-## Architecture
+## Repository Structure
+
+```
+regent/
+├── .claude-plugin/    # Plugin manifest (references plugin/)
+├── plugin/            # Claude Code plugin
+│   ├── commands/      # Slash command definitions (markdown)
+│   └── agents/        # Specialized agent definitions (markdown)
+├── slackbot/          # Slack ROSI app (Deno/TypeScript)
+│   ├── functions/     # Custom Slack functions
+│   ├── workflows/     # Workflow definitions
+│   └── triggers/      # Trigger configurations
+└── .regent/           # Spec documents for this project
+```
+
+## Claude Code Plugin
 
 ### Plugin Structure
 
-This is a Claude Code plugin (not a standalone application). The plugin is defined in `.claude-plugin/plugin.json`.
+The plugin is defined in `.claude-plugin/plugin.json` which references files in `plugin/`.
 
 ```
-commands/          # Slash command definitions (markdown files)
-agents/            # Specialized agent definitions (markdown files)
-.regent/           # Runtime directory created in target projects
+plugin/
+├── commands/          # Slash command definitions (markdown files)
+└── agents/            # Specialized agent definitions (markdown files)
 ```
 
 ### Command Flow
@@ -88,7 +105,7 @@ Commands invoke specialized agents for specific work:
 
 ### Adding a New Command
 
-Create a markdown file in `commands/` with frontmatter:
+Create a markdown file in `plugin/commands/` with frontmatter:
 
 ```markdown
 ---
@@ -102,7 +119,7 @@ description: One-line description shown in help
 
 ### Adding a New Agent
 
-Create a markdown file in `agents/` with frontmatter:
+Create a markdown file in `plugin/agents/` with frontmatter:
 
 ```markdown
 ---
@@ -115,6 +132,33 @@ model: sonnet  # or opus, haiku
 
 [Agent behavior instructions]
 ```
+
+## Slack Bot
+
+The Slack bot enables collaborative specification development in Slack. It uses the Slack ROSI (Run On Slack Infrastructure) platform with Deno/TypeScript.
+
+### Slack Bot Structure
+
+```
+slackbot/
+├── manifest.ts        # App manifest (name, scopes, workflows)
+├── deno.jsonc         # Deno configuration
+├── slack.json         # Slack CLI hooks
+├── functions/         # Custom function implementations
+├── workflows/         # Workflow definitions
+└── triggers/          # Trigger configurations
+```
+
+### Development
+
+```bash
+cd slackbot
+slack login          # Authenticate with Slack
+slack run            # Run locally
+slack deploy         # Deploy to Slack infrastructure
+```
+
+See `slackbot/README.md` for detailed development instructions.
 
 ## Output Formats
 

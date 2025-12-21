@@ -1,170 +1,69 @@
 # Regent
 
-Spec-driven development workflow for Claude Code.
+Spec-driven development workflow for AI-assisted software engineering.
 
-Regent brings structured software development directly into Claude Code, guiding you from idea to implementation through well-defined phases with specialized agents ensuring quality at each step.
+## Overview
 
-## Installation
+Regent is a monorepo containing tools for structured specification development:
 
-```bash
-# Clone or copy to your plugins directory
-claude plugin install regent
-```
-
-Or for local development:
-
-```bash
-claude --plugin-dir /path/to/regent
-```
+| Package | Description |
+|---------|-------------|
+| [plugin/](./plugin/) | Claude Code plugin for local spec-driven development |
+| [slackbot/](./slackbot/) | Slack bot for collaborative spec development in teams |
 
 ## Quick Start
 
+### Claude Code Plugin
+
 ```bash
-# 1. Initialize your project
+# Install the plugin
+claude plugin install regent
+
+# Initialize and start brainstorming
 /regent:init
-
-# 2. Explore and capture your idea
 /regent:brainstorm
-
-# 3. Transform into structured requirements
-/regent:specify
-
-# 4. Create technical architecture
-/regent:design
-
-# 5. Generate implementation tasks
-/regent:plan
-
-# 6. Implement tasks one by one
-/regent:execute
 ```
+
+See [plugin/README.md](./plugin/README.md) for full documentation.
+
+### Slack Bot
+
+```bash
+cd slackbot
+slack login
+slack run
+```
+
+See [slackbot/README.md](./slackbot/README.md) for development setup.
 
 ## Workflow
 
-```
-/regent:init
-    ↓
-/regent:brainstorm → brainstorm.md (validated)
-    ↓
-/regent:specify → requirements.md (EARS format)
-    ↓
-/regent:design → design.md (architecture + properties)
-    ↓
-/regent:plan → tasks.md (TDD-ordered checklist)
-    ↓
-/regent:execute → implements tasks one at a time
-```
-
-## Commands
-
-### Core Workflow
-
-| Command | Description |
-|---------|-------------|
-| `/regent:init` | Initialize project for Regent |
-| `/regent:brainstorm` | Explore and capture an idea through Q&A |
-| `/regent:specify` | Transform brainstorm into EARS requirements |
-| `/regent:design` | Create technical architecture and design |
-| `/regent:plan` | Generate TDD-ordered implementation tasks |
-| `/regent:execute` | Implement the next incomplete task |
-
-### Utilities
-
-| Command | Description |
-|---------|-------------|
-| `/regent:status` | Show current progress on specs |
-| `/regent:list` | List all specs in the project |
-| `/regent:help` | Display workflow guide |
-
-## Agents
-
-Regent uses specialized agents for different phases:
-
-### Spec Writers
-
-| Agent | Purpose |
-|-------|---------|
-| `regent-brainstorm-writer` | Conversational spec exploration |
-| `regent-spec-validator` | Validate specs for issues |
-| `regent-requirements-writer` | EARS requirements formatting |
-| `regent-design-writer` | Architecture documentation |
-| `regent-tasks-writer` | TDD task breakdown |
-
-### Implementation
-
-| Agent | Purpose |
-|-------|---------|
-| `regent-python-engineer` | Python backend development |
-| `regent-cdk-architect` | AWS CDK infrastructure |
-| `regent-test-engineer` | Test writing and TDD |
-| `regent-code-reviewer` | Code quality review |
-
-## Project Structure
-
-After initialization, Regent creates:
+Both the plugin and Slack bot follow the same spec-driven workflow:
 
 ```
-.regent/
-├── config.yml              # Configuration (placeholder for v2)
-└── {spec-name}/            # One directory per spec
-    ├── brainstorm.md       # Captured idea
-    ├── requirements.md     # EARS format requirements
-    ├── design.md           # Technical architecture
-    ├── tasks.md            # Implementation checklist
-    └── briefs/             # Task briefs
-        └── task-{N}.md
+Brainstorm → Requirements → Design → Tasks → Execute
 ```
 
-## Output Formats
+1. **Brainstorm** - Explore and capture ideas through Q&A
+2. **Specify** - Transform into structured EARS requirements
+3. **Design** - Create technical architecture with correctness properties
+4. **Plan** - Generate TDD-ordered implementation tasks
+5. **Execute** - Implement tasks one at a time
 
-### Requirements (EARS Format)
+## Repository Structure
 
-```markdown
-### Requirement 1: User Authentication
-
-**User Story:** As a user, I want to log in securely, so that my data is protected.
-
-#### Acceptance Criteria
-
-1. WHEN a user submits valid credentials THEN the system SHALL create a session
-2. IF credentials are invalid THEN the system SHALL return an error message
 ```
-
-### Design (Correctness Properties)
-
-```markdown
-**Property 1: Session Uniqueness**
-*For any* user, *there should be* at most one active session at a time
-**Validates:** Requirements 1.1, 1.2
+regent/
+├── .claude-plugin/    # Plugin manifest
+├── plugin/            # Claude Code plugin
+│   ├── commands/      # Slash commands
+│   └── agents/        # Specialized agents
+├── slackbot/          # Slack ROSI app
+│   ├── functions/     # Slack functions
+│   ├── workflows/     # Workflow definitions
+│   └── triggers/      # Trigger configs
+└── .regent/           # Specs for this project
 ```
-
-### Tasks (TDD-Ordered)
-
-```markdown
-- [ ] 1. Write tests for session creation
-  - Test valid credentials create session
-  - Test invalid credentials return error
-  - _Requirements: 1.1, 1.2_
-
-- [ ] 2. Implement session creation
-  - Create session service
-  - Add authentication logic
-  - _Requirements: 1.1, 1.2_
-```
-
-## Iteration
-
-Re-run any phase command to refine that document. Changes flow downstream on next phase execution.
-
-Example: If `/regent:plan` reveals gaps, re-run `/regent:design` to update the architecture, then `/regent:plan` again.
-
-## Version Control
-
-Specs are committed to version control:
-- `.regent/` directory is NOT gitignored
-- Enables team collaboration on specs
-- Provides audit trail of design decisions
-- Allows spec review in PRs
 
 ## License
 

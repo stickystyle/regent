@@ -1,3 +1,8 @@
 # Local Claude settings
 .claude/settings.local.json
 .claude/*.lock
+
+# Deno / Slack CLI
+.deno/
+slackbot/.slack/
+deno.lock

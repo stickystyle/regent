@@ -6,5 +6,7 @@
     "name": "Ryan Parrish"
   },
   "license": "MIT",
-  "keywords": ["spec-driven", "tdd", "workflow", "development"]
+  "keywords": ["spec-driven", "tdd", "workflow", "development"],
+  "commands": ["./plugin/commands/"],
+  "agents": ["./plugin/agents/"]
 }
