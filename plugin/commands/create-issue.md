@@ -39,7 +39,18 @@ Construct spec file URLs:
 - `{repo-url}/blob/{branch}/.regent/{spec-name}/design.md`
 - `{repo-url}/blob/{branch}/.regent/{spec-name}/tasks.md`
 
-## Phase 3: Extract Brief and Create Issue (REQUIRED - Use Subagent)
+## Phase 3: Ensure Labels Exist
+
+Before creating any issues, ensure the required labels exist. This happens once per command invocation:
+
+```bash
+gh label create "regent" --description "Managed by Regent" --color "6f42c1" --force
+gh label create "spec:{spec-name}" --description "Spec: {spec-name}" --color "0366d6" --force
+```
+
+Note: The `--force` flag ensures this is idempotent (won't fail if labels already exist).
+
+## Phase 4: Extract Brief and Create Issue (REQUIRED - Use Subagent)
 
 **Important**: Use a subagent to both extract the brief AND create the GitHub issue. This keeps your main context clean and is especially important when creating issues in bulk.
 
@@ -160,15 +171,7 @@ prompt: |
 
   ## Creating the GitHub Issue
 
-  After extracting the brief, create the GitHub issue:
-
-  1. First, ensure labels exist (create if needed):
-     ```bash
-     gh label create "regent" --description "Managed by Regent" --color "6f42c1" --force
-     gh label create "spec:{spec-name}" --description "Spec: {spec-name}" --color "0366d6" --force
-     ```
-
-  2. Create the issue using the brief you extracted:
+  After extracting the brief, create the GitHub issue using the brief you extracted:
      ```bash
      gh issue create \
        --title "Task {N}: {task title}" \
@@ -177,7 +180,7 @@ prompt: |
        --label "spec:{spec-name}"
      ```
 
-  3. Capture and return the issue number from the output
+  Capture and return the issue number from the output
 
   ## Important Rules
   - Extract text VERBATIM - do not summarize or paraphrase requirements
@@ -189,7 +192,7 @@ prompt: |
   - Return only the issue number (e.g., "42") so the main context can update tasks.md
 ```
 
-## Phase 4: Update tasks.md
+## Phase 5: Update tasks.md
 
 1. The subagent will return the issue number (e.g., "42")
 
