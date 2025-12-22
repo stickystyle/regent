@@ -102,11 +102,9 @@ describe("Message Type", () => {
         sender: "bot",
         text: "What problem are you trying to solve?",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
 
       assertEquals(message.sender, "bot");
-      assertEquals(message.is_official_answer, false);
       assertExists(message.text);
       assertExists(message.timestamp);
     });
@@ -116,11 +114,9 @@ describe("Message Type", () => {
         sender: "U1234567890",
         text: "@regent We need to track user authentication state.",
         timestamp: "1234567890.123456",
-        is_official_answer: true,
       };
 
       assertEquals(message.sender, "U1234567890");
-      assertEquals(message.is_official_answer, true);
     });
 
     it("should support messages with attachments", () => {
@@ -135,7 +131,6 @@ describe("Message Type", () => {
         sender: "U1234567890",
         text: "@regent Here's the spec document",
         timestamp: "1234567890.123456",
-        is_official_answer: true,
         attachments: [attachment],
       };
 
@@ -163,7 +158,6 @@ describe("Message Type", () => {
         sender: "U1234567890",
         text: "@regent Multiple files attached",
         timestamp: "1234567890.123456",
-        is_official_answer: true,
         attachments: attachments,
       };
 
@@ -177,7 +171,6 @@ describe("Message Type", () => {
         sender: "U1234567890",
         text: "@regent Simple text answer",
         timestamp: "1234567890.123456",
-        is_official_answer: true,
       };
 
       assertEquals(message.attachments, undefined);
@@ -188,7 +181,6 @@ describe("Message Type", () => {
         sender: "U1234567890",
         text: "@regent Answer with empty attachments",
         timestamp: "1234567890.123456",
-        is_official_answer: true,
         attachments: [],
       };
 
@@ -202,7 +194,6 @@ describe("Message Type", () => {
         sender: "bot",
         text: "What is your project about?",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
 
       assertEquals(message.sender, "bot");
@@ -214,7 +205,6 @@ describe("Message Type", () => {
         sender: userId,
         text: "My answer to the question",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
 
       assertEquals(message.sender, userId);
@@ -228,7 +218,6 @@ describe("Message Type", () => {
           sender: userId,
           text: "Test message",
           timestamp: "1234567890.123456",
-          is_official_answer: false,
         };
 
         assertEquals(message.sender, userId);
@@ -242,10 +231,8 @@ describe("Message Type", () => {
         sender: "U1234567890",
         text: "@regent This is an official answer",
         timestamp: "1234567890.123456",
-        is_official_answer: true,
       };
 
-      assertEquals(message.is_official_answer, true);
       assertEquals(isOfficialAnswer(message.text), true);
     });
 
@@ -254,10 +241,8 @@ describe("Message Type", () => {
         sender: "U1234567890",
         text: "Just a discussion message",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
 
-      assertEquals(message.is_official_answer, false);
       assertEquals(isOfficialAnswer(message.text), false);
     });
 
@@ -266,10 +251,8 @@ describe("Message Type", () => {
         sender: "bot",
         text: "What problem are you solving?",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
 
-      assertEquals(message.is_official_answer, false);
       assertEquals(message.sender, "bot");
     });
   });
@@ -281,7 +264,6 @@ describe("Message Type", () => {
         sender: "U1234567890",
         text: "@regent Answer",
         timestamp: timestamp,
-        is_official_answer: true,
       };
 
       assertEquals(message.timestamp, timestamp);
@@ -300,7 +282,6 @@ describe("Message Type", () => {
           sender: "bot",
           text: "Question",
           timestamp: ts,
-          is_official_answer: false,
         };
 
         assertEquals(message.timestamp, ts);
@@ -315,7 +296,6 @@ describe("Message Type", () => {
         sender: "U1234567890",
         text: text,
         timestamp: "1234567890.123456",
-        is_official_answer: true,
       };
 
       assertEquals(message.text, text);
@@ -327,7 +307,6 @@ describe("Message Type", () => {
         sender: "U1234567890",
         text: longText,
         timestamp: "1234567890.123456",
-        is_official_answer: true,
       };
 
       assertEquals(message.text.length, longText.length);
@@ -340,7 +319,6 @@ describe("Message Type", () => {
         sender: "U1234567890",
         text: text,
         timestamp: "1234567890.123456",
-        is_official_answer: true,
       };
 
       assertEquals(message.text, text);
@@ -351,7 +329,6 @@ describe("Message Type", () => {
         sender: "bot",
         text: "",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
 
       assertEquals(message.text, "");

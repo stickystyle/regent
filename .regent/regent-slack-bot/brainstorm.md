@@ -196,11 +196,11 @@ graph LR
 1. **Trigger**: User invokes `/brainstorm` command
 2. **Session Init**: Bot creates session record, posts intro message
 3. **Repo Exploration** (if `--repo`): Bot explores codebase, posts findings
-4. **Q&A Loop**: Bot asks questions, team discusses, official answers via `@regent`
-5. **Confidence Check**: After each answer, bot evaluates if ready for draft
-6. **Canvas Creation**: At 95% confidence, bot creates canvas with draft spec
-7. **Review Loop**: Team provides feedback (thread or canvas edits), bot updates
-8. **Finalization**: On `@regent approved`, bot creates PR (if repo) or marks complete
+4. **Q&A Loop**: Bot asks questions, team discusses, answers via `@regent`
+5. **Confidence Check**: After each response, bot evaluates if ready for draft
+6. **Canvas Creation**: At 95% confidence (or user signals ready), bot creates canvas with draft spec
+7. **Review Loop**: Team provides feedback via `@regent`, bot updates
+8. **Finalization**: When user signals approval, bot creates PR (if repo) or marks complete
 
 ## Slack Integration
 
@@ -228,7 +228,7 @@ graph LR
 
 | Event | Trigger | Action |
 |-------|---------|--------|
-| `app_mention` | `@regent <text>` | Process as official answer or command |
+| `app_mention` | `@regent <text>` | Pass to LLM for conversational response |
 | `message` | Any thread message | Store for context (don't respond unless mentioned) |
 | `file_shared` | Attachment in thread | Process as additional context |
 
@@ -247,17 +247,19 @@ graph LR
 3. Includes in the next Claude request as additional context
 4. References the attachment in follow-up questions when relevant
 
-### Mention Commands
+### Conversational Interaction
 
-| Command | Action |
-|---------|--------|
-| `@regent <answer>` | Record as official answer to current question (first answer wins) |
-| `@regent next` | Skip current question, ask next |
-| `@regent ready` | Signal team is ready for draft (even if bot isn't at 95%) |
-| `@regent <feedback>` | During review phase, provide feedback on draft |
-| `@regent approved` | Finalize spec, create PR if applicable |
+The bot uses natural conversation rather than explicit commands. Just talk to it with `@regent`:
 
-**Multiple Answers:** When multiple `@regent <answer>` responses are given for the same question, the first one is taken as the official answer. Subsequent answers are acknowledged but not used. If the team needs to change an answer, use `@regent <feedback>` to correct it.
+| What you want | Example phrases |
+|---------------|-----------------|
+| Answer a question | "@regent The API should support REST and GraphQL" |
+| Skip a question | "@regent Let's skip this one", "@regent Next question please" |
+| Ready for review | "@regent I think we've covered everything", "@regent We're done" |
+| Give feedback | "@regent This section needs more detail on error handling" |
+| Approve the spec | "@regent Looks good!", "@regent Ship it", "@regent Approved" |
+
+The LLM interprets intent naturally - no keyword matching required. The bot should feel like a team member, not a bot with controls.
 
 ### Canvas Integration
 
@@ -267,7 +269,7 @@ graph LR
 - Posted to thread with review instructions
 
 **Updates:**
-- Feedback provided via thread only (`@regent <feedback>`)
+- Feedback provided via thread (just talk to `@regent`)
 - Bot updates canvas in response to thread feedback
 - Direct canvas edits are not monitored (keeps implementation simple)
 
@@ -449,10 +451,10 @@ This self-assessment approach keeps confidence evaluation flexible and contextua
 ```mermaid
 stateDiagram-v2
     [*] --> Questioning: /brainstorm
-    Questioning --> Questioning: @regent answer
-    Questioning --> Review: 95% confidence OR @regent ready
-    Review --> Review: feedback
-    Review --> Finalized: @regent approved
+    Questioning --> Questioning: @regent (conversation)
+    Questioning --> Review: 95% confidence OR user signals ready
+    Review --> Review: @regent (feedback)
+    Review --> Finalized: user signals approval
     Finalized --> [*]
 
     Questioning --> Expired: 30 days inactive
@@ -464,8 +466,8 @@ stateDiagram-v2
 
 | State | Description | Allowed Actions |
 |-------|-------------|-----------------|
-| `questioning` | Active Q&A | answer, next, ready, attach files |
-| `review` | Canvas created, awaiting approval | feedback, edit canvas, approved |
+| `questioning` | Active Q&A | converse with @regent, attach files |
+| `review` | Canvas created, awaiting approval | provide feedback, signal approval |
 | `finalized` | Spec complete | (read-only) |
 | `expired` | Soft TTL reached | Any mention resumes from thread history |
 
@@ -699,11 +701,11 @@ Migration steps:
 - [ ] `--repo` flag enables codebase exploration
 - [ ] Bot asks one question at a time
 - [ ] Team discussions visible but don't trigger bot
-- [ ] `@regent <answer>` records official answers
-- [ ] `@regent next` and `@regent ready` control flow
-- [ ] Canvas created at 95% confidence
-- [ ] Canvas updates from both thread feedback and direct edits
-- [ ] `@regent approved` creates PR when repo specified
+- [ ] `@regent` messages trigger conversational response from LLM
+- [ ] LLM interprets user intent (answers, readiness, approval) naturally
+- [ ] Canvas created at 95% confidence or when user signals ready
+- [ ] Canvas updates from thread feedback
+- [ ] PR created when user signals approval (if repo specified)
 - [ ] Sessions resume correctly after inactivity
 - [ ] Attachments processed as context
 

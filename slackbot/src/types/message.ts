@@ -43,9 +43,10 @@ export interface ProcessedAttachment {
  * Message represents a single message in a brainstorming session thread.
  *
  * Messages can be either:
- * - Bot questions (sender = "bot", is_official_answer = false)
- * - User answers (sender = user ID, is_official_answer = true if prefixed with @regent)
- * - User discussion (sender = user ID, is_official_answer = false)
+ * - Bot questions (sender = "bot")
+ * - User messages (sender = user ID)
+ *
+ * All @regent mentions are passed to the LLM for intent understanding.
  */
 export interface Message {
   /**
@@ -69,14 +70,6 @@ export interface Message {
   timestamp: string;
 
   /**
-   * Whether this message is an official answer to a question.
-   *
-   * Official answers are user messages that start with "@regent" prefix.
-   * These are the answers that get recorded in the spec document.
-   */
-  is_official_answer: boolean;
-
-  /**
    * Optional list of processed file attachments.
    *
    * Attachments provide additional context for the brainstorming session.
@@ -85,23 +78,68 @@ export interface Message {
 }
 
 /**
- * Detects whether a message is an official answer based on @regent prefix.
+ * Detects whether a message contains @regent mention (any command type).
  *
- * Official answers must start with "@regent" (case-sensitive, no leading whitespace).
- * The prefix can be followed by a space and answer text, or be the only content.
+ * This function checks if a message starts with "@regent" prefix or contains
+ * a bot mention tag followed by "@regent". This is useful for detecting any
+ * @regent interaction, regardless of whether it's an answer or control command.
+ *
+ * For checking if a message is specifically an answer command (not a control
+ * command like 'next' or 'ready'), use `isAnswerCommand()` instead.
  *
  * @param text - The message text to check
- * @returns true if the message starts with "@regent", false otherwise
+ * @returns true if the message contains @regent mention, false otherwise
  *
  * @example
  * ```ts
  * isOfficialAnswer("@regent This is my answer");  // true
- * isOfficialAnswer("@regent");                     // true
+ * isOfficialAnswer("@regent next");                // true (but not an answer!)
+ * isOfficialAnswer("@regent ready");               // true (but not an answer!)
  * isOfficialAnswer("Just a discussion message");   // false
  * isOfficialAnswer("  @regent");                   // false (leading whitespace)
  * isOfficialAnswer("I'll use @regent here");       // false (not at start)
  * ```
+ *
+ * @deprecated Use `isMentionCommand()` from handlers/message-event.ts for new code
  */
 export function isOfficialAnswer(text: string): boolean {
-  return text.startsWith("@regent");
+  return text.startsWith("@regent") || /^<@\w+>\s*@regent/.test(text);
+}
+
+/**
+ * Detects whether a message is an answer command (not a control command).
+ *
+ * This function checks if a message contains @regent and is specifically an
+ * answer command, excluding control commands like 'next', 'ready', 'approved'.
+ *
+ * @param text - The message text to check
+ * @returns true if the message is an answer command, false otherwise
+ *
+ * @example
+ * ```ts
+ * isAnswerCommand("@regent This is my answer");   // true
+ * isAnswerCommand("@regent next");                 // false (control command)
+ * isAnswerCommand("@regent ready");                // false (control command)
+ * isAnswerCommand("Just a discussion message");    // false
+ * ```
+ */
+export function isAnswerCommand(text: string): boolean {
+  if (!isOfficialAnswer(text)) {
+    return false;
+  }
+
+  // Remove bot mention tag if present
+  let cleanText = text;
+  const botMentionPattern = /^<@\w+>\s+/;
+  if (botMentionPattern.test(text)) {
+    cleanText = text.replace(botMentionPattern, "");
+  }
+
+  // Remove @regent prefix
+  const afterRegent = cleanText.slice(7).trim(); // "@regent" is 7 chars
+  const lowerAfterRegent = afterRegent.toLowerCase();
+
+  // Check if it's a control command
+  const controlCommands = ["next", "ready", "approved"];
+  return !controlCommands.includes(lowerAfterRegent);
 }

@@ -29,7 +29,6 @@ describe("MessageCache", () => {
         sender: "U1234567890",
         text: "Hello",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
 
       cache.append(sessionId, message);
@@ -45,19 +44,16 @@ describe("MessageCache", () => {
         sender: "U1234567890",
         text: "First",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
       const message2: Message = {
         sender: "bot",
         text: "Second",
         timestamp: "1234567890.123457",
-        is_official_answer: false,
       };
       const message3: Message = {
         sender: "U1234567890",
         text: "Third",
         timestamp: "1234567890.123458",
-        is_official_answer: true,
       };
 
       cache.append(sessionId, message1);
@@ -79,7 +75,6 @@ describe("MessageCache", () => {
         sender: "U1234567890",
         text: "Hello",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
 
       cache.append(sessionId, message);
@@ -94,13 +89,11 @@ describe("MessageCache", () => {
         sender: "U1234567890",
         text: "First",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
       const message2: Message = {
         sender: "bot",
         text: "Second",
         timestamp: "1234567890.123457",
-        is_official_answer: false,
       };
 
       cache.append(sessionId, message1);
@@ -116,7 +109,6 @@ describe("MessageCache", () => {
         sender: "U1234567890",
         text: "@regent This is my answer",
         timestamp: "1234567890.123456",
-        is_official_answer: true,
         attachments: [
           {
             file_id: "F1234567890",
@@ -133,7 +125,6 @@ describe("MessageCache", () => {
       assertEquals(messages[0].sender, "U1234567890");
       assertEquals(messages[0].text, "@regent This is my answer");
       assertEquals(messages[0].timestamp, "1234567890.123456");
-      assertEquals(messages[0].is_official_answer, true);
       assertExists(messages[0].attachments);
       assertEquals(messages[0].attachments!.length, 1);
       assertEquals(messages[0].attachments![0].file_id, "F1234567890");
@@ -146,13 +137,11 @@ describe("MessageCache", () => {
         sender: "U1234567890",
         text: "Session 1 message",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
       const message2: Message = {
         sender: "U9876543210",
         text: "Session 2 message",
         timestamp: "9876543210.654321",
-        is_official_answer: false,
       };
 
       cache.append(sessionId1, message1);
@@ -175,7 +164,6 @@ describe("MessageCache", () => {
         sender: "U1234567890",
         text: "Hello",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
 
       cache.append(sessionId, message);
@@ -192,13 +180,11 @@ describe("MessageCache", () => {
         sender: "U1234567890",
         text: "Session 1",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
       const message2: Message = {
         sender: "U1234567890",
         text: "Session 2",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
 
       cache.append(sessionId1, message1);
@@ -224,7 +210,6 @@ describe("MessageCache", () => {
         sender: "U1234567890",
         text: "Hello",
         timestamp: "1234567890.123456",
-        is_official_answer: false,
       };
 
       cache.append(sessionId1, message);

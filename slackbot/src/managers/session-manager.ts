@@ -241,7 +241,6 @@ export class SessionManager {
           sender: slackMsg.bot_id ? "bot" : slackMsg.user,
           text: slackMsg.text,
           timestamp: slackMsg.ts,
-          is_official_answer: !slackMsg.bot_id && isOfficialAnswer(slackMsg.text),
         };
         this.messageCache.append(sessionId, message);
       }

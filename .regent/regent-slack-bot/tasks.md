@@ -64,13 +64,20 @@ Epic: #42
   - Implement slash command handler with ROSI function signature
   - _Requirements: 1.1, 1.2, 1.3, 1.4_
 
-- [ ] 8. Implement event routing and mention parsing (#16)
+- [x] 8. Implement event routing and mention parsing (#16)
   - Write tests for event filtering (app_mention vs message, thread detection)
   - Write tests for mention parsing (@regent answer, next, ready, approved)
   - Write tests for official answer recording
   - Implement event handler with ROSI function signature
   - Write property test: **Property 2 - Answer Recording**
   - _Requirements: 3.2, 3.3, 3.4, 3.5_
+
+- [x] 8a. Refactor event handling to conversational approach (#43)
+  - Remove command parsing (answer, next, ready, approved keywords)
+  - Remove `is_official_answer` field from Message type
+  - Simplify to: detect @regent mention → pass to LLM
+  - Update tests for conversational approach
+  - _Requirements: 3.2, 3.3_
 
 - [ ] 9. Implement Slack messaging utilities (#22)
   - Write tests for postMessage (simple, threaded, error handling)
@@ -143,7 +150,7 @@ Epic: #42
 - [ ] 17. Implement session state machine and phase transitions (#18)
   - Write tests for phase transition logic (questioning → review → finalized)
   - Write tests for confidence threshold detection (>= 95%)
-  - Write tests for manual transitions (@regent ready, @regent approved)
+  - Write tests for LLM-inferred transitions (user signals readiness or approval conversationally)
   - Implement SessionOrchestrator state management
   - Write property test: **Property 4 - Phase Transition Triggers**
   - _Requirements: 3.5, 3.6, 5.1, 6.1_
@@ -151,15 +158,15 @@ Epic: #42
 - [ ] 18. Implement question-answer loop with tool use (#19)
   - Write tests for tool loop execution (single tool, multiple tools, no tools)
   - Write tests for system prompt building (per phase, with/without repo)
-  - Write tests for message history formatting (official answers, attachments)
+  - Write tests for message history formatting (thread context, attachments)
   - Implement tool loop with Anthropic Messages API
   - Write property test: **Property 3 - Single Question Rule**
   - _Requirements: 2.3, 2.5, 3.1, 3.2, 3.3_
 
 - [ ] 19. Implement review phase and finalization (#20)
   - Write tests for Canvas creation on review phase entry
-  - Write tests for feedback processing (@regent <feedback>)
-  - Write tests for approval handling (@regent approved)
+  - Write tests for feedback processing (LLM interprets feedback from conversation)
+  - Write tests for approval handling (LLM recognizes approval signals)
   - Write tests for finalization (with repo → PR, without repo → complete)
   - Implement review orchestration logic
   - _Requirements: 5.3, 6.1, 6.2, 6.5_
@@ -223,7 +230,7 @@ Epic: #42
 - [ ] 26. Write documentation and usage guides (#34)
   - Create README with installation instructions
   - Document slash command syntax (/brainstorm [--repo owner/repo] <idea>)
-  - Document @regent commands (answer, next, ready, approved)
+  - Document conversational interaction patterns (not commands)
   - Create troubleshooting guide (error messages, recovery)
   - Add JSDoc comments to all public interfaces
   - Create architecture decision records (ADR) for key design choices

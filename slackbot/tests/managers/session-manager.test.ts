@@ -695,14 +695,11 @@ describe("SessionManager", () => {
       );
       assertEquals(cachedMessages.length, 4);
 
-      // First @regent message is official
-      assertEquals(cachedMessages[0].is_official_answer, true);
-      // Bot message is not official
-      assertEquals(cachedMessages[1].is_official_answer, false);
-      // Discussion message is not official
-      assertEquals(cachedMessages[2].is_official_answer, false);
-      // Second @regent message is official
-      assertEquals(cachedMessages[3].is_official_answer, true);
+      // Verify messages were cached with correct content
+      assertEquals(cachedMessages[0].text, "@regent start");
+      assertEquals(cachedMessages[1].sender, "bot");
+      assertEquals(cachedMessages[2].text, "Let me think...");
+      assertEquals(cachedMessages[3].text, "@regent The problem is X");
     });
 
     it("should set phase to Questioning when no Canvas found", async () => {
@@ -1048,23 +1045,23 @@ describe("SessionManager", () => {
         "All messages should be in cache",
       );
 
-      // Verify official answers are correctly identified
-      const officialAnswers = cachedMessages.filter(
-        (m) => m.is_official_answer,
+      // Verify @regent messages are identified
+      const regentMessages = cachedMessages.filter(
+        (m) => m.text.includes("@regent"),
       );
       assertEquals(
-        officialAnswers.length,
+        regentMessages.length,
         4,
-        "Should have 4 official answers (@regent messages from users)",
+        "Should have 4 @regent messages from users",
       );
 
       // Verify bot messages are identified
       const botMessages = cachedMessages.filter((m) => m.sender === "bot");
       assertEquals(botMessages.length, 3, "Should have 3 bot questions");
 
-      // Verify discussion messages are preserved but not marked as official
+      // Verify discussion messages are preserved
       const discussionMessages = cachedMessages.filter(
-        (m) => m.sender !== "bot" && !m.is_official_answer,
+        (m) => m.sender !== "bot" && !m.text.includes("@regent"),
       );
       assertEquals(
         discussionMessages.length,
