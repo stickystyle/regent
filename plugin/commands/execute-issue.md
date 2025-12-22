@@ -351,21 +351,23 @@ Once verified:
    The changes will be included in the spec's pull request."
    ```
 
-## Phase 9: Pull Request Management
+## Phase 9: Pull Request Management (First Task Only)
 
-### Check for Existing PR
+Check if a PR already exists for the feature branch:
 
 ```bash
-PR_NUMBER=$(gh pr list --head "feature/{spec-name}" --state open --json number --jq '.[0].number')
+gh pr list --head "feature/{spec-name}" --state open --json number --jq '.[0].number'
 ```
 
-### If No PR Exists (First Task)
+**If a PR already exists**: Skip to Phase 10. No PR management needed.
+
+**If no PR exists** (this is the first task for this spec):
 
 1. Get epic issue number from `tasks.md` header (line starting with `Epic: #`)
 
-2. Get repo URL and default branch:
+2. Get repo URL:
    ```bash
-   gh repo view --json url,defaultBranchRef --jq '"\(.url) \(.defaultBranchRef.name)"'
+   gh repo view --json url --jq '.url'
    ```
 
 3. Create a draft PR:
@@ -383,9 +385,9 @@ PR_NUMBER=$(gh pr list --head "feature/{spec-name}" --state open --json number -
 
    ## Spec Documents
 
-   - [Requirements]({requirements-url})
-   - [Design]({design-url})
-   - [Tasks]({tasks-url})
+   - [Requirements]({repo-url}/blob/feature/{spec-name}/.regent/{spec-name}/requirements.md)
+   - [Design]({repo-url}/blob/feature/{spec-name}/.regent/{spec-name}/design.md)
+   - [Tasks]({repo-url}/blob/feature/{spec-name}/.regent/{spec-name}/tasks.md)
 
    ---
    *Managed by [Regent](https://github.com/stickystyle/regent)*
@@ -394,11 +396,7 @@ PR_NUMBER=$(gh pr list --head "feature/{spec-name}" --state open --json number -
      --draft
    ```
 
-4. Capture the new PR number for reporting
-
-### If PR Already Exists (Subsequent Tasks)
-
-No updates needed - task progress is tracked via the epic issue's sub-issues.
+4. Report the new PR URL to the user
 
 ## Phase 10: Report Completion
 
@@ -407,15 +405,18 @@ Report to user:
 Task {N} complete: {title}
 
 Branch: feature/{spec-name}
-Commit: {commit-sha}
 Issue: #{issue-number} (closed)
-PR: {pr-url}
+```
 
-Progress: {X}/{total} tasks complete
+If this was the first task (PR was just created), include:
+```
+PR: {pr-url} (draft)
+```
 
-{If all tasks complete}:
+If all tasks in `tasks.md` are now complete (all `- [x]`), add:
+```
 All tasks complete! The PR is ready to be marked as "Ready for Review".
-Run: gh pr ready {pr-number}
+Run: gh pr ready
 ```
 
 ## Principles
