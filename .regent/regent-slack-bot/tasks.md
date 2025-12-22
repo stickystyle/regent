@@ -20,7 +20,7 @@
   - Write tests for session ID formatting ({channel_id}:{thread_ts})
   - _Requirements: 1.5, 3.2, 7.1_
 
-- [ ] 3. Implement SpecDocument and RepositoryContext models (#36)
+- [x] 3. Implement SpecDocument and RepositoryContext models (#36)
   - Write tests for SpecDocument (all sections, markdown formatting)
   - Implement SpecDocument type matching Regent brainstorm.md format
   - Write tests for RepositoryContext (framework detection, file parsing)
