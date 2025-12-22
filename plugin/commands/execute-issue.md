@@ -171,8 +171,10 @@ On confirmation, implement the task using specialized agents.
 | Task Type | Agent |
 |-----------|-------|
 | Python backend code | regent-python-engineer |
+| TypeScript/JavaScript code | regent-typescript-engineer |
 | AWS CDK infrastructure | regent-cdk-architect |
 | Test writing | regent-test-engineer |
+| Other languages | regent-engineer |
 | Code review (after significant changes) | regent-code-reviewer |
 
 ### For Test Tasks
@@ -225,6 +227,31 @@ If tests fail:
 - Re-run code review if changes were significant
 - Re-run tests
 
+## Phase 7.5: Human Review (REQUIRED)
+
+**STOP HERE** - Do not proceed to commit until the user confirms.
+
+Present a summary of the work completed:
+```
+Task {N} implementation complete: {title}
+
+Changes made:
+- {list modified files}
+- {summary of key changes}
+
+Tests: {pass/fail status}
+Code review: Passed
+
+Ready to commit and close issue #{issue-number}?
+```
+
+**Wait for user confirmation** before proceeding to Phase 8.
+
+If the user requests changes:
+- Go back to Phase 5 (Implementation) with the requested modifications
+- Re-run code review (Phase 6) and verification (Phase 7)
+- Return here for another confirmation
+
 ## Phase 8: Commit and Push
 
 Once verified:
@@ -244,6 +271,15 @@ Once verified:
 3. Push to the feature branch:
    ```bash
    git push origin feature/{spec-name}
+   ```
+
+4. Close the issue (since we're using a single feature branch, we close manually):
+   ```bash
+   gh issue close {issue-number} --comment "✅ Task completed and merged to feature/{spec-name}
+
+   Commit: $(git rev-parse HEAD)
+
+   The changes will be included in the spec's pull request."
    ```
 
 ## Phase 9: Pull Request Management
@@ -312,7 +348,7 @@ PR_NUMBER=$(gh pr list --head "feature/{spec-name}" --state open --json number -
    gh pr comment $PR_NUMBER --body "✅ **Task {N} complete**: {title}
 
    Commit: {commit-sha}
-   Issue: #{issue-number} (will close on merge)"
+   Issue: #{issue-number} (closed)"
    ```
 
 ## Phase 10: Report Completion
@@ -323,7 +359,7 @@ Task {N} complete: {title}
 
 Branch: feature/{spec-name}
 Commit: {commit-sha}
-Issue: #{issue-number} (closes on merge)
+Issue: #{issue-number} (closed)
 PR: {pr-url}
 
 Progress: {X}/{total} tasks complete
@@ -339,7 +375,7 @@ Run: gh pr ready {pr-number}
 - **Single PR**: One PR per spec, updated as tasks complete
 - **Fresh context**: Codebase is explored at execution time, not planning time
 - **Incremental progress**: Tasks can build on each other without waiting for merges
-- **Traceability**: Issues close automatically when PR merges (via commit messages)
+- **Traceability**: Issues close immediately when task is pushed to feature branch (manual close for PM visibility)
 - **TDD**: Tests first, then implementation
 
 ## If Unclear

@@ -224,8 +224,10 @@ On confirmation, implement the task using specialized agents.
 | Task Type | Agent |
 |-----------|-------|
 | Python backend code | regent-python-engineer |
+| TypeScript/JavaScript code | regent-typescript-engineer |
 | AWS CDK infrastructure | regent-cdk-architect |
 | Test writing | regent-test-engineer |
+| Other languages | regent-engineer |
 | Code review (after significant changes) | regent-code-reviewer |
 
 ### For Test Tasks
