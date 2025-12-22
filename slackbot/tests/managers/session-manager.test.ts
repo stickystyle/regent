@@ -1,11 +1,16 @@
 // ABOUTME: Tests for SessionManager covering session lifecycle and Slack Datastore integration.
-// ABOUTME: Includes property test for Property 9 - TTL Enforcement (30 days from creation).
+// ABOUTME: Includes property tests for Property 6 (Session Resumption) and Property 9 (TTL Enforcement).
 
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import {
+  MockSlackClient,
+  type SlackThreadMessage,
+} from "../../src/clients/slack-client.ts";
 import { MockDatastoreClient } from "../../src/managers/datastore-client.ts";
+import { MessageCache } from "../../src/managers/message-cache.ts";
 import { SessionManager } from "../../src/managers/session-manager.ts";
-import { Phase } from "../../src/types/session.ts";
+import { formatSessionId, Phase } from "../../src/types/session.ts";
 
 describe("SessionManager", () => {
   let datastore: MockDatastoreClient;
@@ -548,6 +553,615 @@ describe("SessionManager", () => {
 
       const ttl = new Date(session.ttl);
       assertEquals(ttl.toISOString(), "2024-03-29T12:00:00.000Z");
+    });
+  });
+
+  describe("rebuildFromHistory", () => {
+    let slackClient: MockSlackClient;
+    let messageCache: MessageCache;
+
+    beforeEach(() => {
+      slackClient = new MockSlackClient();
+      messageCache = new MessageCache();
+    });
+
+    afterEach(() => {
+      slackClient.clear();
+      messageCache.clear();
+    });
+
+    it("should throw error when SlackClient is not configured", async () => {
+      const managerWithoutSlack = new SessionManager(datastore);
+      await assertRejects(
+        () => managerWithoutSlack.rebuildFromHistory("C123", "123.456"),
+        Error,
+        "SlackClient is required",
+      );
+    });
+
+    it("should create session from thread messages", async () => {
+      // Arrange
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const messages: SlackThreadMessage[] = [
+        { user: "U1111111111", text: "@regent start", ts: "1234567890.123456" },
+        {
+          user: "B9999999999",
+          text: "What problem are you solving?",
+          ts: "1234567890.123457",
+          bot_id: "B9999999999",
+        },
+        {
+          user: "U1111111111",
+          text: "@regent We need a better way to manage specs",
+          ts: "1234567890.123458",
+        },
+      ];
+      slackClient.setThreadMessages(channelId, threadTs, messages);
+
+      const managerWithSlack = new SessionManager(
+        datastore,
+        undefined,
+        slackClient,
+        messageCache,
+      );
+
+      // Act
+      const session = await managerWithSlack.rebuildFromHistory(
+        channelId,
+        threadTs,
+      );
+
+      // Assert
+      assertExists(session);
+      assertEquals(session.session_id, formatSessionId(channelId, threadTs));
+      assertEquals(session.phase, Phase.Questioning);
+    });
+
+    it("should detect initiator from first user mentioning @regent", async () => {
+      // Arrange
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const messages: SlackThreadMessage[] = [
+        {
+          user: "U2222222222",
+          text: "Just chatting here",
+          ts: "1234567890.123455",
+        },
+        { user: "U1111111111", text: "@regent start", ts: "1234567890.123456" },
+        {
+          user: "U3333333333",
+          text: "@regent me too",
+          ts: "1234567890.123457",
+        },
+      ];
+      slackClient.setThreadMessages(channelId, threadTs, messages);
+
+      const managerWithSlack = new SessionManager(
+        datastore,
+        undefined,
+        slackClient,
+        messageCache,
+      );
+
+      // Act
+      const session = await managerWithSlack.rebuildFromHistory(
+        channelId,
+        threadTs,
+      );
+
+      // Assert
+      assertEquals(session.initiator_user_id, "U1111111111");
+    });
+
+    it("should mark messages starting with @regent as official answers", async () => {
+      // Arrange
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const messages: SlackThreadMessage[] = [
+        { user: "U1111111111", text: "@regent start", ts: "1234567890.123456" },
+        {
+          user: "B9999999999",
+          text: "What is the problem?",
+          ts: "1234567890.123457",
+          bot_id: "B9999999999",
+        },
+        {
+          user: "U1111111111",
+          text: "Let me think...",
+          ts: "1234567890.123458",
+        },
+        {
+          user: "U1111111111",
+          text: "@regent The problem is X",
+          ts: "1234567890.123459",
+        },
+      ];
+      slackClient.setThreadMessages(channelId, threadTs, messages);
+
+      const managerWithSlack = new SessionManager(
+        datastore,
+        undefined,
+        slackClient,
+        messageCache,
+      );
+
+      // Act
+      await managerWithSlack.rebuildFromHistory(channelId, threadTs);
+
+      // Assert
+      const cachedMessages = messageCache.get(
+        formatSessionId(channelId, threadTs),
+      );
+      assertEquals(cachedMessages.length, 4);
+
+      // First @regent message is official
+      assertEquals(cachedMessages[0].is_official_answer, true);
+      // Bot message is not official
+      assertEquals(cachedMessages[1].is_official_answer, false);
+      // Discussion message is not official
+      assertEquals(cachedMessages[2].is_official_answer, false);
+      // Second @regent message is official
+      assertEquals(cachedMessages[3].is_official_answer, true);
+    });
+
+    it("should set phase to Questioning when no Canvas found", async () => {
+      // Arrange
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const messages: SlackThreadMessage[] = [
+        { user: "U1111111111", text: "@regent start", ts: "1234567890.123456" },
+        {
+          user: "B9999999999",
+          text: "What is your goal?",
+          ts: "1234567890.123457",
+          bot_id: "B9999999999",
+        },
+      ];
+      slackClient.setThreadMessages(channelId, threadTs, messages);
+
+      const managerWithSlack = new SessionManager(
+        datastore,
+        undefined,
+        slackClient,
+        messageCache,
+      );
+
+      // Act
+      const session = await managerWithSlack.rebuildFromHistory(
+        channelId,
+        threadTs,
+      );
+
+      // Assert
+      assertEquals(session.phase, Phase.Questioning);
+    });
+
+    it("should set phase to Review when Canvas message exists in thread", async () => {
+      // Arrange
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      // Canvas messages typically have a specific block structure
+      const canvasBlock = {
+        type: "file",
+        file_id: "F1234567890",
+        source: "remote",
+      };
+      const messages: SlackThreadMessage[] = [
+        { user: "U1111111111", text: "@regent start", ts: "1234567890.123456" },
+        {
+          user: "B9999999999",
+          text: "Here is the spec canvas",
+          ts: "1234567890.123457",
+          bot_id: "B9999999999",
+          blocks: [canvasBlock],
+        },
+      ];
+      slackClient.setThreadMessages(channelId, threadTs, messages);
+
+      const managerWithSlack = new SessionManager(
+        datastore,
+        undefined,
+        slackClient,
+        messageCache,
+      );
+
+      // Act
+      const session = await managerWithSlack.rebuildFromHistory(
+        channelId,
+        threadTs,
+      );
+
+      // Assert
+      assertEquals(session.phase, Phase.Review);
+      assertEquals(session.canvas_id, "F1234567890");
+    });
+
+    it("should handle pagination for threads with 100+ messages", async () => {
+      // Arrange
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+
+      // Create 150 messages to test pagination
+      const messages: SlackThreadMessage[] = [];
+      messages.push({
+        user: "U1111111111",
+        text: "@regent start",
+        ts: "1234567890.000000",
+      });
+      for (let i = 1; i < 150; i++) {
+        messages.push({
+          user: i % 2 === 0 ? "U1111111111" : "B9999999999",
+          text: `Message ${i}`,
+          ts: `1234567890.${String(i).padStart(6, "0")}`,
+          bot_id: i % 2 === 1 ? "B9999999999" : undefined,
+        });
+      }
+      slackClient.setThreadMessages(channelId, threadTs, messages);
+      slackClient.setPageSize(100); // Simulate Slack's 100 message limit
+
+      const managerWithSlack = new SessionManager(
+        datastore,
+        undefined,
+        slackClient,
+        messageCache,
+      );
+
+      // Act
+      const session = await managerWithSlack.rebuildFromHistory(
+        channelId,
+        threadTs,
+      );
+
+      // Assert
+      assertExists(session);
+      const cachedMessages = messageCache.get(
+        formatSessionId(channelId, threadTs),
+      );
+      assertEquals(
+        cachedMessages.length,
+        150,
+        "Should have all 150 messages from paginated results",
+      );
+    });
+
+    it("should populate MessageCache with all messages", async () => {
+      // Arrange
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const messages: SlackThreadMessage[] = [
+        { user: "U1111111111", text: "@regent start", ts: "1234567890.123456" },
+        {
+          user: "B9999999999",
+          text: "Question 1",
+          ts: "1234567890.123457",
+          bot_id: "B9999999999",
+        },
+        {
+          user: "U1111111111",
+          text: "@regent Answer 1",
+          ts: "1234567890.123458",
+        },
+        {
+          user: "B9999999999",
+          text: "Question 2",
+          ts: "1234567890.123459",
+          bot_id: "B9999999999",
+        },
+        {
+          user: "U1111111111",
+          text: "@regent Answer 2",
+          ts: "1234567890.123460",
+        },
+      ];
+      slackClient.setThreadMessages(channelId, threadTs, messages);
+
+      const managerWithSlack = new SessionManager(
+        datastore,
+        undefined,
+        slackClient,
+        messageCache,
+      );
+
+      // Act
+      await managerWithSlack.rebuildFromHistory(channelId, threadTs);
+
+      // Assert
+      const cachedMessages = messageCache.get(
+        formatSessionId(channelId, threadTs),
+      );
+      assertEquals(cachedMessages.length, 5);
+      assertEquals(cachedMessages[0].text, "@regent start");
+      assertEquals(cachedMessages[0].sender, "U1111111111");
+      assertEquals(cachedMessages[1].text, "Question 1");
+      assertEquals(cachedMessages[1].sender, "bot");
+      assertEquals(cachedMessages[4].text, "@regent Answer 2");
+    });
+
+    it("should throw error when no @regent mention found in thread", async () => {
+      // Arrange
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const messages: SlackThreadMessage[] = [
+        { user: "U1111111111", text: "Hello", ts: "1234567890.123456" },
+        { user: "U2222222222", text: "Hi there", ts: "1234567890.123457" },
+      ];
+      slackClient.setThreadMessages(channelId, threadTs, messages);
+
+      const managerWithSlack = new SessionManager(
+        datastore,
+        undefined,
+        slackClient,
+        messageCache,
+      );
+
+      // Act & Assert
+      await assertRejects(
+        () => managerWithSlack.rebuildFromHistory(channelId, threadTs),
+        Error,
+        "No @regent mention found",
+      );
+    });
+
+    it("should throw error when thread is empty", async () => {
+      // Arrange
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      slackClient.setThreadMessages(channelId, threadTs, []);
+
+      const managerWithSlack = new SessionManager(
+        datastore,
+        undefined,
+        slackClient,
+        messageCache,
+      );
+
+      // Act & Assert
+      await assertRejects(
+        () => managerWithSlack.rebuildFromHistory(channelId, threadTs),
+        Error,
+        "Thread is empty",
+      );
+    });
+  });
+
+  describe("Property 6: Session Resumption Completeness", () => {
+    let slackClient: MockSlackClient;
+    let messageCache: MessageCache;
+
+    beforeEach(() => {
+      slackClient = new MockSlackClient();
+      messageCache = new MessageCache();
+    });
+
+    afterEach(() => {
+      slackClient.clear();
+      messageCache.clear();
+    });
+
+    it("should rebuild complete conversation history after session expiration", async () => {
+      // Arrange - Create a thread with existing conversation history
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const conversationHistory: SlackThreadMessage[] = [
+        { user: "U1111111111", text: "@regent start", ts: "1234567890.123456" },
+        {
+          user: "B9999999999",
+          text: "What problem are you solving?",
+          ts: "1234567890.123457",
+          bot_id: "B9999999999",
+        },
+        {
+          user: "U1111111111",
+          text: "@regent Managing specifications",
+          ts: "1234567890.123458",
+        },
+        {
+          user: "B9999999999",
+          text: "Who are the users?",
+          ts: "1234567890.123459",
+          bot_id: "B9999999999",
+        },
+        {
+          user: "U1111111111",
+          text: "@regent Developers and PMs",
+          ts: "1234567890.123460",
+        },
+        {
+          user: "B9999999999",
+          text: "What is the scope?",
+          ts: "1234567890.123461",
+          bot_id: "B9999999999",
+        },
+        {
+          user: "U2222222222",
+          text: "Good question",
+          ts: "1234567890.123462",
+        },
+        {
+          user: "U1111111111",
+          text: "@regent Team-level spec management",
+          ts: "1234567890.123463",
+        },
+      ];
+      slackClient.setThreadMessages(channelId, threadTs, conversationHistory);
+
+      // Create initial session
+      const initialTime = new Date("2025-01-01T00:00:00.000Z");
+      const initialDatastore = new MockDatastoreClient(initialTime);
+      const initialManager = new SessionManager(
+        initialDatastore,
+        () => initialTime,
+        slackClient,
+        messageCache,
+      );
+
+      const originalSession = await initialManager.createSession(
+        channelId,
+        threadTs,
+        "owner/repo",
+        "U1111111111",
+      );
+      assertExists(originalSession);
+
+      // Fast-forward time past TTL (31 days) to simulate expiration
+      const expiredTime = new Date("2025-02-02T00:00:00.000Z");
+      initialDatastore.setCurrentTime(expiredTime);
+
+      // Verify session is expired
+      const expiredSession = await initialManager.loadSession(
+        channelId,
+        threadTs,
+      );
+      assertEquals(expiredSession, null, "Session should be expired");
+
+      // Create new datastore and manager for rebuild (simulating new instance)
+      const rebuildDatastore = new MockDatastoreClient(expiredTime);
+      const rebuildCache = new MessageCache();
+      const rebuildManager = new SessionManager(
+        rebuildDatastore,
+        () => expiredTime,
+        slackClient,
+        rebuildCache,
+      );
+
+      // Act - Rebuild session from history
+      const rebuiltSession = await rebuildManager.rebuildFromHistory(
+        channelId,
+        threadTs,
+      );
+
+      // Assert - Complete history is rebuilt
+      assertExists(rebuiltSession);
+      assertEquals(
+        rebuiltSession.initiator_user_id,
+        "U1111111111",
+        "Initiator should be detected from history",
+      );
+
+      const cachedMessages = rebuildCache.get(
+        formatSessionId(channelId, threadTs),
+      );
+      assertEquals(
+        cachedMessages.length,
+        conversationHistory.length,
+        "All messages should be in cache",
+      );
+
+      // Verify official answers are correctly identified
+      const officialAnswers = cachedMessages.filter(
+        (m) => m.is_official_answer,
+      );
+      assertEquals(
+        officialAnswers.length,
+        4,
+        "Should have 4 official answers (@regent messages from users)",
+      );
+
+      // Verify bot messages are identified
+      const botMessages = cachedMessages.filter((m) => m.sender === "bot");
+      assertEquals(botMessages.length, 3, "Should have 3 bot questions");
+
+      // Verify discussion messages are preserved but not marked as official
+      const discussionMessages = cachedMessages.filter(
+        (m) => m.sender !== "bot" && !m.is_official_answer,
+      );
+      assertEquals(
+        discussionMessages.length,
+        1,
+        "Should have 1 discussion message",
+      );
+    });
+
+    it("should correctly infer phase when rebuilding with Canvas", async () => {
+      // Arrange - Thread with Canvas (review phase)
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const canvasBlock = {
+        type: "file",
+        file_id: "F9876543210",
+        source: "remote",
+      };
+      const conversationHistory: SlackThreadMessage[] = [
+        { user: "U1111111111", text: "@regent start", ts: "1234567890.123456" },
+        {
+          user: "B9999999999",
+          text: "Question 1",
+          ts: "1234567890.123457",
+          bot_id: "B9999999999",
+        },
+        {
+          user: "U1111111111",
+          text: "@regent Answer 1",
+          ts: "1234567890.123458",
+        },
+        {
+          user: "B9999999999",
+          text: "Here is your spec Canvas for review",
+          ts: "1234567890.123459",
+          bot_id: "B9999999999",
+          blocks: [canvasBlock],
+        },
+      ];
+      slackClient.setThreadMessages(channelId, threadTs, conversationHistory);
+
+      const now = new Date("2025-01-01T00:00:00.000Z");
+      const managerWithSlack = new SessionManager(
+        datastore,
+        () => now,
+        slackClient,
+        messageCache,
+      );
+
+      // Act
+      const session = await managerWithSlack.rebuildFromHistory(
+        channelId,
+        threadTs,
+      );
+
+      // Assert
+      assertEquals(
+        session.phase,
+        Phase.Review,
+        "Should be in Review phase when Canvas exists",
+      );
+      assertEquals(
+        session.canvas_id,
+        "F9876543210",
+        "Canvas ID should be extracted",
+      );
+    });
+
+    it("should preserve message ordering when rebuilding", async () => {
+      // Arrange
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const messages: SlackThreadMessage[] = [
+        { user: "U1111111111", text: "@regent First", ts: "1234567890.000001" },
+        { user: "U1111111111", text: "Second", ts: "1234567890.000002" },
+        { user: "U1111111111", text: "Third", ts: "1234567890.000003" },
+        { user: "U1111111111", text: "Fourth", ts: "1234567890.000004" },
+      ];
+      slackClient.setThreadMessages(channelId, threadTs, messages);
+
+      const managerWithSlack = new SessionManager(
+        datastore,
+        undefined,
+        slackClient,
+        messageCache,
+      );
+
+      // Act
+      await managerWithSlack.rebuildFromHistory(channelId, threadTs);
+
+      // Assert
+      const cachedMessages = messageCache.get(
+        formatSessionId(channelId, threadTs),
+      );
+      assertEquals(cachedMessages[0].text, "@regent First");
+      assertEquals(cachedMessages[1].text, "Second");
+      assertEquals(cachedMessages[2].text, "Third");
+      assertEquals(cachedMessages[3].text, "Fourth");
     });
   });
 });

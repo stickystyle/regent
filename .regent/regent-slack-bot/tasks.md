@@ -47,7 +47,7 @@ Epic: #42
   - Write property test: **Property 9 - TTL Enforcement**
   - _Requirements: 1.5, 3.6, 5.1, 7.1, 7.2_
 
-- [ ] 6. Implement MessageCache and thread history rebuilding (#13)
+- [x] 6. Implement MessageCache and thread history rebuilding (#13)
   - Write tests for MessageCache (get, append, evict)
   - Implement in-memory MessageCache with session scoping
   - Write tests for rebuildFromHistory (pagination, official answer detection, phase inference)
