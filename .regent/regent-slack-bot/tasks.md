@@ -57,7 +57,7 @@ Epic: #42
 
 ## Slack Integration
 
-- [ ] 7. Implement slash command handler (#15)
+- [x] 7. Implement slash command handler (#15)
   - Write tests for command parsing (--repo flag, idea extraction)
   - Write tests for channel validation (reject DMs, accept public/private)
   - Write tests for command flow (session creation, acknowledgment message)
