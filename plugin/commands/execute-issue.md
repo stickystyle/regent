@@ -160,58 +160,124 @@ Ask: "Ready to proceed with Task {N}: {Title}?"
 
 Wait for confirmation before continuing.
 
-## Phase 5: Implementation
+## Phase 5: Implementation (REQUIRED - Use Subagent)
 
 On confirmation, implement the task using specialized agents.
 
-**Important**: When invoking agents, tell them to read `.regent/{spec-name}/briefs/task-{N}.md` for full context.
+**Important**: You MUST delegate implementation to a specialized agent using the Task tool. Do NOT implement code directly in the main context.
 
 ### Selecting the Right Agent
 
-| Task Type | Agent |
-|-----------|-------|
-| Python backend code | regent-python-engineer |
-| TypeScript/JavaScript code | regent-typescript-engineer |
-| AWS CDK infrastructure | regent-cdk-architect |
-| Test writing | regent-test-engineer |
-| Other languages | regent-engineer |
-| Code review (after significant changes) | regent-code-reviewer |
+| Task Type | Agent (subagent_type) |
+|-----------|----------------------|
+| Python backend code | `regent-python-engineer` |
+| TypeScript/JavaScript code | `regent-typescript-engineer` |
+| AWS CDK infrastructure | `regent-cdk-architect` |
+| Test writing | `regent-test-engineer` |
+| Other languages | `regent-engineer` |
 
-### For Test Tasks
+### Implementation Invocation
 
-1. Write the test file following project conventions
-2. Use patterns from the Template Reference section of the brief
-3. Run the test to confirm it fails (TDD red phase)
-4. If the test passes unexpectedly, investigate
+Use the Task tool with these parameters:
 
-### For Implementation Tasks
+```
+subagent_type: "{appropriate-agent-from-table}"
+description: "Implement task {N}: {brief title}"
+prompt: |
+  Read `.regent/{spec-name}/briefs/task-{N}.md` for full context on what to implement.
 
-1. Implement the code following the interfaces from design.md exactly
-2. Run related tests to verify (TDD green phase)
-3. Refactor if needed while keeping tests green
+  ## Task Summary
 
-### Implementation Guidelines
+  {paste the task title and key points from the brief}
 
-- Follow existing code patterns in the project
-- Use the interfaces exactly as defined in the issue's Design Context
-- Add appropriate error handling
-- Include docstrings and type hints
-- Keep changes focused on the single task
+  ## What to Do
 
-## Phase 6: Code Review (REQUIRED)
+  {For test tasks}:
+  1. Write the test file following project conventions
+  2. Use patterns from the Template Reference section of the brief
+  3. Run the test to confirm it fails (TDD red phase)
+  4. If the test passes unexpectedly, investigate
+
+  {For implementation tasks}:
+  1. Implement the code following the interfaces from design.md exactly
+  2. Run related tests to verify (TDD green phase)
+  3. Refactor if needed while keeping tests green
+
+  ## Implementation Guidelines
+
+  - Follow existing code patterns in the project
+  - Use the interfaces exactly as defined in the Design Context
+  - Add appropriate error handling
+  - Include docstrings and type hints
+  - Keep changes focused on the single task
+
+  ## Output
+
+  Report what files were created/modified and the test results.
+```
+
+## Phase 6: Code Review (REQUIRED - Use Subagent)
 
 After implementation, you MUST run the code-reviewer agent.
 
+### Code Review Invocation
+
+Use the Task tool with these parameters:
+
+```
+subagent_type: "regent-code-reviewer"
+description: "Review task {N} implementation"
+prompt: |
+  Review the code changes made for Task {N}.
+
+  Read `.regent/{spec-name}/briefs/task-{N}.md` for context on what was implemented.
+
+  Focus on:
+  - Code quality and maintainability
+  - Security vulnerabilities
+  - Adherence to the design from design.md
+  - Proper error handling
+  - Test coverage adequacy
+  - Consistency with project patterns
+
+  Provide your review in the standard format with Critical Issues, Warnings, and Suggestions.
+```
+
 ### Code Review Loop
 
-1. **Invoke the code-reviewer agent**:
-   - Use the Task tool with `subagent_type: "regent-code-reviewer"`
-   - Tell it to review the changes made for Task {N}
-   - Point it to `.regent/{spec-name}/briefs/task-{N}.md` for context
+1. **Evaluate the review results**:
+   - If the review passes with no Critical Issues → proceed to Phase 7
+   - If issues identified → continue to step 2
 
-2. **Evaluate the review results**:
-   - If the review passes → proceed to Phase 7
-   - If issues identified → fix with the same implementation agent, then re-review
+2. **Fix issues using the SAME implementation agent (Use Subagent)**:
+   - You MUST delegate fixes to the same agent type that did the original implementation
+   - Do NOT fix code directly in the main context
+   - Use the Task tool:
+
+   ```
+   subagent_type: "{same-agent-as-phase-5}"
+   description: "Fix review issues for task {N}"
+   prompt: |
+     Read `.regent/{spec-name}/briefs/task-{N}.md` for the original task context.
+
+     ## Code Review Feedback
+
+     {paste the code review results here}
+
+     ## What to Do
+
+     Address all Critical Issues and Warnings identified in the review.
+     Make the minimal changes needed to resolve each issue.
+     Run tests after making changes to ensure nothing is broken.
+
+     ## Output
+
+     Report what changes were made to address each issue.
+   ```
+
+3. **Re-run code review**:
+   - After fixes are applied, invoke `regent-code-reviewer` again (same syntax as above)
+   - Repeat steps 1-3 until the review passes
 
 ## Phase 7: Verification
 
