@@ -63,16 +63,78 @@ If the user requests changes, either:
 
 On approval:
 1. Write to `.regent/{spec-name}/tasks.md`
-2. Confirm:
+
+### Phase 6: Create Epic Issue
+
+After saving tasks.md, create a GitHub epic issue to serve as the master tracking issue for this spec.
+
+1. **Get repository info:**
+   ```bash
+   gh repo view --json url,defaultBranchRef --jq '"\(.url) \(.defaultBranchRef.name)"'
+   ```
+
+2. **Ensure labels exist:**
+   ```bash
+   gh label create "regent" --description "Managed by Regent" --color "6f42c1" --force
+   gh label create "regent:epic" --description "Regent epic/master issue" --color "d93f0b" --force
+   gh label create "spec:{spec-name}" --description "Spec: {spec-name}" --color "0366d6" --force
+   ```
+
+3. **Extract summary from brainstorm.md:**
+   Read `.regent/{spec-name}/brainstorm.md` and extract the first 1-2 sentences from the Overview section.
+
+4. **Construct spec file URLs:**
+   - `{repo-url}/blob/{branch}/.regent/{spec-name}/brainstorm.md`
+   - `{repo-url}/blob/{branch}/.regent/{spec-name}/requirements.md`
+   - `{repo-url}/blob/{branch}/.regent/{spec-name}/design.md`
+   - `{repo-url}/blob/{branch}/.regent/{spec-name}/tasks.md`
+
+5. **Create the epic issue:**
+   ```bash
+   EPIC_NUM=$(gh issue create \
+     --title "Epic: {spec-name}" \
+     --label "regent" \
+     --label "regent:epic" \
+     --label "spec:{spec-name}" \
+     --body "$(cat <<'EOF'
+   ## {Spec Title from brainstorm.md}
+
+   {1-2 sentence summary from brainstorm.md overview}
+
+   ### Spec Documents
+
+   - [Brainstorm]({brainstorm-url}) - Original exploration and Q&A
+   - [Requirements]({requirements-url}) - EARS-format requirements
+   - [Design]({design-url}) - Architecture and correctness properties
+   - [Tasks]({tasks-url}) - Implementation plan
+
+   ---
+   *Managed by [Regent](https://github.com/stickystyle/regent)*
+   EOF
+   )" | grep -o '[0-9]\+$')
+   ```
+
+6. **Update tasks.md with epic reference:**
+   Add the epic issue number to the header of tasks.md:
+   ```markdown
+   # Implementation Plan
+
+   Epic: #{epic-number}
+
+   ## Project Setup
+   ...
+   ```
+
+7. **Confirm to user:**
    ```
    Implementation plan saved to .regent/{spec-name}/tasks.md
 
    Summary:
    - X total tasks
-   - Y test tasks (TDD)
-   - Z implementation tasks
+   - Epic issue: #{epic-number}
 
-   Next step: Run /regent:execute to start implementing tasks.
+   Next step: Run /regent:create-issue to create task issues, or
+              Run /regent:execute to start implementing tasks locally.
    ```
 
 ## Important Notes

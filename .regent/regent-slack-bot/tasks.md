@@ -1,5 +1,7 @@
 # Implementation Plan
 
+Epic: #42
+
 ## Project Setup
 
 - [x] 1. Initialize Deno project with ROSI structure and testing infrastructure (#14)
