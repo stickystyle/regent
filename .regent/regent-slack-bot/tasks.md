@@ -39,7 +39,7 @@ Epic: #42
 
 ## Session Management
 
-- [ ] 5. Implement SessionManager with Slack Datastore (#38)
+- [x] 5. Implement SessionManager with Slack Datastore (#38)
   - Write tests for createSession (TTL, duplicate prevention, repo storage)
   - Write tests for loadSession (existing, missing, expired handling)
   - Write tests for updateSession (phase transitions, confidence updates)
