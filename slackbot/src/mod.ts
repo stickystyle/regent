@@ -3,3 +3,6 @@
 
 // Data models
 export * from "./types/index.ts";
+
+// Error handling
+export * from "./errors/index.ts";
