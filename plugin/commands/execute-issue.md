@@ -358,9 +358,14 @@ PR_NUMBER=$(gh pr list --head "feature/{spec-name}" --state open --json number -
 
 ### If No PR Exists (First Task)
 
-1. Read `tasks.md` to get all tasks for the PR body
+1. Get epic issue number from `tasks.md` header (line starting with `Epic: #`)
 
-2. Create a draft PR:
+2. Get repo URL and default branch:
+   ```bash
+   gh repo view --json url,defaultBranchRef --jq '"\(.url) \(.defaultBranchRef.name)"'
+   ```
+
+3. Create a draft PR:
    ```bash
    gh pr create \
      --title "{Spec Title}" \
@@ -369,20 +374,15 @@ PR_NUMBER=$(gh pr list --head "feature/{spec-name}" --state open --json number -
 
    {Brief description from the spec's brainstorm.md or requirements.md}
 
-   ## Tasks
+   ## Progress
 
-   - [x] Task {N}: {title} (#issue-number)
-   - [ ] Task {N+1}: {title} (#issue-number)
-   - [ ] Task {N+2}: {title} (#issue-number)
-   ...
+   Track implementation progress via the epic issue: #{epic-number}
 
-   ## Requirements
+   ## Spec Documents
 
-   See [{spec-name}/requirements.md]({requirements-url})
-
-   ## Design
-
-   See [{spec-name}/design.md]({design-url})
+   - [Requirements]({requirements-url})
+   - [Design]({design-url})
+   - [Tasks]({tasks-url})
 
    ---
    *Managed by [Regent](https://github.com/stickystyle/regent)*
@@ -391,31 +391,11 @@ PR_NUMBER=$(gh pr list --head "feature/{spec-name}" --state open --json number -
      --draft
    ```
 
-3. Capture the new PR number for reporting
+4. Capture the new PR number for reporting
 
 ### If PR Already Exists (Subsequent Tasks)
 
-1. Get current PR body:
-   ```bash
-   gh pr view $PR_NUMBER --json body --jq '.body'
-   ```
-
-2. Update the task checkbox in the PR body:
-   - Find the line matching `- [ ] Task {N}:`
-   - Replace with `- [x] Task {N}:`
-
-3. Update the PR:
-   ```bash
-   gh pr edit $PR_NUMBER --body "{updated body}"
-   ```
-
-4. Add a comment noting completion:
-   ```bash
-   gh pr comment $PR_NUMBER --body "✅ **Task {N} complete**: {title}
-
-   Commit: {commit-sha}
-   Issue: #{issue-number} (closed)"
-   ```
+No updates needed - task progress is tracked via the epic issue's sub-issues.
 
 ## Phase 10: Report Completion
 
@@ -438,10 +418,11 @@ Run: gh pr ready {pr-number}
 ## Principles
 
 - **Shared branch**: All tasks for a spec work on `feature/{spec-name}`
-- **Single PR**: One PR per spec, updated as tasks complete
+- **Single PR**: One PR per spec, links to epic for progress tracking
+- **Epic tracking**: Task progress is visible via epic issue sub-issues
 - **Fresh context**: Codebase is explored at execution time, not planning time
 - **Incremental progress**: Tasks can build on each other without waiting for merges
-- **Traceability**: Issues close immediately when task is pushed to feature branch (manual close for PM visibility)
+- **Traceability**: Issues close when task is pushed to feature branch
 - **TDD**: Tests first, then implementation
 
 ## If Unclear
