@@ -4,40 +4,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Regent is a monorepo containing:
-1. **plugin/** - A Claude Code plugin for spec-driven development workflow
-2. **slackbot/** - A Slack bot that enables collaborative spec development in Slack
+Regent is a monorepo for spec-driven development workflow:
+- **plugin/** - Claude Code plugin for local spec-driven development
+- **slackbot/** - Slack ROSI app (Deno/TypeScript) for collaborative spec development in teams
 
-## Repository Structure
+## Development Commands
 
+### Slack Bot (slackbot/)
+
+```bash
+cd slackbot
+deno task test              # Run tests
+deno task test:coverage     # Run tests with coverage
+deno task check             # Type-check all TypeScript
+deno task lint              # Lint code
+deno task fmt               # Format code
+
+slack login                 # Authenticate with Slack CLI
+slack run                   # Run locally
+slack deploy                # Deploy to Slack infrastructure
 ```
-regent/
-├── .claude-plugin/    # Plugin manifest (references plugin/)
-├── plugin/            # Claude Code plugin
-│   ├── commands/      # Slash command definitions (markdown)
-│   └── agents/        # Specialized agent definitions (markdown)
-├── slackbot/          # Slack ROSI app (Deno/TypeScript)
-│   ├── functions/     # Custom Slack functions
-│   ├── workflows/     # Workflow definitions
-│   └── triggers/      # Trigger configurations
-└── .regent/           # Spec documents for this project
+
+### Plugin Development
+
+Plugin files are markdown - no build step required. Test by running:
+```bash
+claude --plugin-dir /path/to/regent
 ```
 
-## Claude Code Plugin
+## Plugin Architecture
 
-### Plugin Structure
-
-The plugin is defined in `.claude-plugin/plugin.json` which references files in `plugin/`.
-
-```
-plugin/
-├── commands/          # Slash command definitions (markdown files)
-└── agents/            # Specialized agent definitions (markdown files)
-```
+The plugin is defined in `.claude-plugin/plugin.json` which references `plugin/commands/` and `plugin/agents/`.
 
 ### Command Flow
-
-Commands are executed in sequence, each producing artifacts that feed the next:
 
 ```
 /regent:init → .regent/ directory
@@ -50,158 +49,54 @@ Commands are executed in sequence, each producing artifacts that feed the next:
     ↓
 /regent:plan → tasks.md (TDD-ordered checklist)
     ↓
-    ├── Solo Workflow:
-    │   /regent:execute → implements one task at a time
-    │
-    └── Team Workflow:
-        /regent:create-issue → GitHub issue (spec-only, no code refs)
-            ↓
-        /regent:execute-issue {N} → branch, implement, PR
+    ├── Solo: /regent:execute → implements one task at a time
+    └── Team: /regent:create-issue → /regent:execute-issue {N} → branch + PR
 ```
-
-### Workflow Comparison
-
-| Aspect | Solo (`/execute`) | Team (`/create-issue` + `/execute-issue`) |
-|--------|-------------------|-------------------------------------------|
-| Code references | Included in brief | Added at execution time |
-| Output | Local changes | GitHub Issue → Branch → PR |
-| Collaboration | Single developer | LLM and non-LLM developers |
-| Staleness risk | Low (immediate) | None (fresh codebase scan) |
-| Git workflow | Manual | Automated branch + PR |
-
-**When to use Team workflow:**
-- Multiple developers working on the same spec
-- Tasks may sit in backlog before implementation
-- Need PR-based code review process
-- Want GitHub Issues as work tracking
 
 ### Agent System
 
-Commands invoke specialized agents for specific work:
+**Spec Writers:** `regent-brainstorm-writer`, `regent-spec-validator`, `regent-requirements-writer`, `regent-design-writer`, `regent-tasks-writer`
 
-**Spec Writers** (used during planning phases):
-- `regent-brainstorm-writer` - Formats Q&A into structured spec
-- `regent-spec-validator` - Validates specs for issues
-- `regent-requirements-writer` - Produces EARS-format requirements
-- `regent-design-writer` - Creates architecture documentation
-- `regent-tasks-writer` - Generates TDD task breakdown
+**Implementation:** `regent-python-engineer`, `regent-cdk-architect`, `regent-test-engineer`, `regent-code-reviewer`
 
-**Implementation** (used during execute phase):
-- `regent-python-engineer` - Python backend development
-- `regent-cdk-architect` - AWS CDK infrastructure
-- `regent-test-engineer` - Test writing and TDD
-- `regent-code-reviewer` - Code quality review
+### Adding Commands/Agents
 
-### Key Patterns
+Commands: Create `plugin/commands/{name}.md` with `---\ndescription: ...\n---` frontmatter
+Agents: Create `plugin/agents/{name}.md` with `---\nname: ...\ndescription: ...\nmodel: sonnet\n---` frontmatter
 
-1. **Single Question at a Time**: During brainstorm, only one question is asked per turn
-2. **Codebase-Aware**: Brainstorm uses Explore agent to understand existing code before asking questions
-3. **Validation Loop**: Specs go through `regent-spec-validator` before finalization
-4. **TDD Order**: Tasks are always ordered test-first (write test → implement → verify)
-5. **Task Briefs**: Execute phases create detailed briefs in `.regent/{spec}/briefs/task-{N}.md`
-6. **Issue Tracking**: Team workflow links tasks to GitHub issues: `- [ ] 1. Task title (#42)`
+## Slack Bot Architecture
 
-## Plugin Development
+Uses Slack ROSI (Run On Slack Infrastructure) platform. Key files:
+- `manifest.ts` - App manifest (scopes, outgoing domains)
+- `functions/` - Custom function implementations
+- `workflows/` - Workflow definitions
+- `triggers/` - Trigger configurations
 
-### Adding a New Command
+Outgoing domains: `api.anthropic.com`, `api.github.com`
 
-Create a markdown file in `plugin/commands/` with frontmatter:
-
-```markdown
----
-description: One-line description shown in help
----
-
-# Command Title
-
-[Command instructions for Claude to follow]
-```
-
-### Adding a New Agent
-
-Create a markdown file in `plugin/agents/` with frontmatter:
-
-```markdown
----
-name: agent-name
-description: When and how to use this agent
-model: sonnet  # or opus, haiku
----
-
-# Agent Title
-
-[Agent behavior instructions]
-```
-
-## Slack Bot
-
-The Slack bot enables collaborative specification development in Slack. It uses the Slack ROSI (Run On Slack Infrastructure) platform with Deno/TypeScript.
-
-### Slack Bot Structure
+## Spec Output Directory
 
 ```
-slackbot/
-├── manifest.ts        # App manifest (name, scopes, workflows)
-├── deno.jsonc         # Deno configuration
-├── slack.json         # Slack CLI hooks
-├── functions/         # Custom function implementations
-├── workflows/         # Workflow definitions
-└── triggers/          # Trigger configurations
+.regent/
+├── config.yml              # Configuration (placeholder)
+└── {spec-name}/            # One directory per spec (kebab-case)
+    ├── brainstorm.md
+    ├── requirements.md     # EARS format
+    ├── design.md           # Architecture + correctness properties
+    ├── tasks.md            # TDD-ordered checklist
+    └── briefs/task-{N}.md  # Execution briefs
 ```
 
-### Development
+## Key Patterns
 
-```bash
-cd slackbot
-slack login          # Authenticate with Slack
-slack run            # Run locally
-slack deploy         # Deploy to Slack infrastructure
-```
+1. **Single Question at a Time** - Brainstorm asks one question per turn
+2. **Codebase-Aware** - Brainstorm uses Explore agent before asking questions
+3. **Validation Loop** - Specs go through `regent-spec-validator` before finalization
+4. **TDD Order** - Tasks are always test-first (write test → implement → verify)
+5. **Issue Tracking** - Team workflow links tasks to GitHub issues: `- [ ] 1. Task title (#42)`
 
-See `slackbot/README.md` for detailed development instructions.
+## Conventions
 
-## Output Formats
-
-### EARS Requirements Format
-
-```markdown
-### Requirement 1: [Title]
-**User Story:** As a [role], I want [goal], so that [benefit].
-
-#### Acceptance Criteria
-1. WHEN [condition] THEN the system SHALL [behavior]
-2. IF [condition] THEN the system SHALL [behavior]
-```
-
-### Correctness Properties Format
-
-```markdown
-**Property 1: [Name]**
-*For any* [scope], *there should be* [invariant]
-**Validates:** Requirements X.Y, X.Z
-```
-
-### Task List Format
-
-```markdown
-- [ ] 1. [Test task title]
-  - [subtask]
-  - _Requirements: X.Y_
-
-- [ ] 2. [Implementation task title] (#42)
-  - [subtask]
-  - _Requirements: X.Y_
-
-- [x] 3. [Completed task title] (#43)
-  - [subtask]
-  - _Requirements: X.Z_
-```
-
-Note: `(#42)` links to GitHub issue when using team workflow.
-
-## Important Conventions
-
-- `.regent/` directory is NOT gitignored in target projects (specs should be versioned)
+- `.regent/` is NOT gitignored (specs should be versioned)
 - Spec names use kebab-case derived from the project title
-- All phases can be re-run to iterate on the spec
 - Each execute session focuses on exactly one task

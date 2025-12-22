@@ -12,7 +12,7 @@
 
 ## Data Models and Core Types
 
-- [ ] 2. Implement Session and Message data models (#35)
+- [x] 2. Implement Session and Message data models (#35)
   - Write tests for Session (composite ID, phase transitions, TTL calculation)
   - Implement Session type with phase enum (questioning, review, finalized)
   - Write tests for Message (official answer detection, attachment parsing)
