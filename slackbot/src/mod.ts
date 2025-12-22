@@ -6,3 +6,6 @@ export * from "./types/index.ts";
 
 // Error handling
 export * from "./errors/index.ts";
+
+// Session management
+export * from "./managers/index.ts";

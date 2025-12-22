@@ -52,21 +52,7 @@ gh label create "spec:{spec-name}" --description "Spec: {spec-name}" --color "03
 
 Note: The `--force` flag ensures this is idempotent (won't fail if labels already exist).
 
-## Phase 4: Find Blocker Issue (If Applicable)
-
-Before creating the issue, determine if this task should be blocked by the previous task:
-
-1. If this is Task 1, there's no blocker
-2. Otherwise, find the previous task's GitHub issue number:
-   ```bash
-   PREV_TASK_NUM=$((N - 1))
-   BLOCKER_ISSUE=$(grep "^- \[.\] ${PREV_TASK_NUM}\." .regent/{spec-name}/tasks.md | grep -o "#[0-9]\+" | tr -d '#')
-   ```
-
-3. If `BLOCKER_ISSUE` is found, you'll use it in the next phase
-4. Note: The epic issue number was extracted in Phase 1
-
-## Phase 5: Extract Brief and Create Issue (REQUIRED - Use Subagent)
+## Phase 4: Extract Brief and Create Issue (REQUIRED - Use Subagent)
 
 **Important**: Use a subagent to both extract the brief AND create the GitHub issue. This keeps your main context clean and is especially important when creating issues in bulk.
 
@@ -91,7 +77,6 @@ prompt: |
 
   - task_number: {N}
   - epic_issue: {EPIC_ISSUE}
-  - blocker_issue: {BLOCKER_ISSUE or "none"}
 
   ## Your Tasks
 
@@ -218,21 +203,6 @@ prompt: |
   '
   ```
 
-  ## Setting the Blocker Dependency (If Applicable)
-
-  If blocker_issue has a value (not "none"), set the dependency using the GitHub REST API:
-
-  1. First, get the issue ID of the blocker issue:
-     ```bash
-     BLOCKER_ID=$(gh api repos/:owner/:repo/issues/{blocker_issue} --jq '.id')
-     ```
-
-  2. Then, set the dependency (NEW_ISSUE is blocked by BLOCKER_ISSUE):
-     ```bash
-     gh api -X POST repos/:owner/:repo/issues/${NEW_ISSUE}/dependencies/blocked_by \
-       --input - <<< "{\"issue_id\":${BLOCKER_ID}}"
-     ```
-
   Return the issue number (the value of NEW_ISSUE)
 
   ## Important Rules
@@ -245,7 +215,7 @@ prompt: |
   - Return only the issue number (e.g., "42") so the main context can update tasks.md
 ```
 
-## Phase 6: Update tasks.md
+## Phase 5: Update tasks.md
 
 1. The subagent will return the issue number (e.g., "42")
 
@@ -260,7 +230,6 @@ prompt: |
 
    Epic: #{epic-issue-number}
    Labels: regent, spec:{spec-name}
-   {If blocker exists: "Blocked by: #{blocker-issue-number}"}
 
    Run /regent:create-issue to create the next issue, or
    Run /regent:execute-issue {issue-number} to implement this task.
@@ -272,4 +241,4 @@ prompt: |
 - No source code references that could become stale
 - Both LLM and human developers can work from these issues
 - Codebase exploration happens at execution time via `/regent:execute-issue`
-- **Issue dependencies**: Task N is automatically marked as blocked by Task N-1 (if N-1 has an issue), enforcing the sequential order from tasks.md using GitHub's native dependency feature
+- Task order is conveyed through the epic's sub-issue list, not blocking dependencies
