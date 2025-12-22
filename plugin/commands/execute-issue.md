@@ -168,13 +168,16 @@ On confirmation, implement the task using specialized agents.
 
 ### Selecting the Right Agent
 
-| Task Type | Agent (subagent_type) |
-|-----------|----------------------|
-| Python backend code | `regent-python-engineer` |
-| TypeScript/JavaScript code | `regent-typescript-engineer` |
-| AWS CDK infrastructure | `regent-cdk-architect` |
-| Test writing | `regent-test-engineer` |
-| Other languages | `regent-engineer` |
+Determine the primary technology from the spec directory (look for `deno.json`, `package.json`, `pyproject.toml`, `cdk.json`, etc.) and select accordingly:
+
+| Project Technology | Agent (subagent_type) |
+|-------------------|----------------------|
+| Python (pyproject.toml, requirements.txt) | `regent-python-engineer` |
+| TypeScript/JavaScript (deno.json, package.json, tsconfig.json) | `regent-typescript-engineer` |
+| AWS CDK (cdk.json) | `regent-cdk-architect` |
+| Other languages (Go, Rust, Java, etc.) | `regent-engineer` |
+
+**Note**: All agents handle TDD workflow (test-first tasks). Select based on **language**, not task type.
 
 ### Implementation Invocation
 

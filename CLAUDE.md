@@ -57,7 +57,7 @@ The plugin is defined in `.claude-plugin/plugin.json` which references `plugin/c
 
 **Spec Writers:** `regent-brainstorm-writer`, `regent-spec-validator`, `regent-requirements-writer`, `regent-design-writer`, `regent-tasks-writer`
 
-**Implementation:** `regent-python-engineer`, `regent-cdk-architect`, `regent-test-engineer`, `regent-code-reviewer`
+**Implementation:** `regent-python-engineer`, `regent-typescript-engineer`, `regent-cdk-architect`, `regent-engineer`, `regent-code-reviewer`
 
 ### Adding Commands/Agents
 
