@@ -6,8 +6,7 @@ import { SessionsDatastore } from "./src/datastores/sessions.ts";
 
 export default Manifest({
   name: "regent-slackbot",
-  description:
-    "Collaborative specification development through conversational AI in Slack",
+  description: "Collaborative specification development through conversational AI in Slack",
   icon: "assets/icon.png",
   workflows: [],
   datastores: [SessionsDatastore],

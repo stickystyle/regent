@@ -9,9 +9,7 @@ import {
   isMentionCommand,
   parseMessageEvent,
 } from "../../src/handlers/message-event.ts";
-import type {
-  SlackMessageEventInput,
-} from "../../src/handlers/message-event.ts";
+import type { SlackMessageEventInput } from "../../src/handlers/message-event.ts";
 
 describe("parseMessageEvent", () => {
   describe("event type detection", () => {
@@ -158,7 +156,6 @@ describe("isMentionCommand", () => {
     });
   });
 });
-
 
 describe("handleMessageEvent", () => {
   describe("event routing", () => {
@@ -389,7 +386,10 @@ describe("Property: Conversational Intent Detection", () => {
     const result = handleMessageEvent(input);
 
     assertEquals(result.shouldRespond, true);
-    assertEquals(result.message?.text, "<@U0BOTID> @regent I think we're all set here, ready to move forward");
+    assertEquals(
+      result.message?.text,
+      "<@U0BOTID> @regent I think we're all set here, ready to move forward",
+    );
     assertEquals(result.message?.sender, "U1234567890");
     assertEquals(result.message?.timestamp, "1234567890.123456");
   });

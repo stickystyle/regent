@@ -3,12 +3,7 @@
 
 import { assertEquals, assertExists } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import {
-  Persona,
-  SpecDocument,
-  toMarkdown,
-  UseCase,
-} from "../../src/types/spec-document.ts";
+import { Persona, SpecDocument, toMarkdown, UseCase } from "../../src/types/spec-document.ts";
 
 describe("SpecDocument Type", () => {
   describe("Persona interface", () => {
@@ -473,7 +468,7 @@ describe("SpecDocument Type", () => {
       };
 
       const markdown = toMarkdown(doc);
-      assertEquals(markdown.includes('Spec with <Special> & Characters'), true);
+      assertEquals(markdown.includes("Spec with <Special> & Characters"), true);
       assertEquals(markdown.includes('"quotes"'), true);
       assertEquals(markdown.includes("<brackets>"), true);
     });

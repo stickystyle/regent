@@ -3,10 +3,7 @@
 
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import {
-  MockSlackClient,
-  type SlackThreadMessage,
-} from "../../src/clients/slack-client.ts";
+import { MockSlackClient, type SlackThreadMessage } from "../../src/clients/slack-client.ts";
 import { MockDatastoreClient } from "../../src/managers/datastore-client.ts";
 import { MessageCache } from "../../src/managers/message-cache.ts";
 import { SessionManager } from "../../src/managers/session-manager.ts";

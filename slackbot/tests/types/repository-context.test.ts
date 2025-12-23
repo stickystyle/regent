@@ -3,11 +3,7 @@
 
 import { assertEquals, assertExists } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import {
-  Framework,
-  RelevantFile,
-  RepositoryContext,
-} from "../../src/types/repository-context.ts";
+import { Framework, RelevantFile, RepositoryContext } from "../../src/types/repository-context.ts";
 
 describe("RepositoryContext Type", () => {
   describe("Framework enum", () => {
@@ -347,7 +343,7 @@ tests/
 
       assertEquals(
         context.relevant_files[0].content?.includes("amazing things"),
-        true
+        true,
       );
     });
 
@@ -361,7 +357,7 @@ tests/
           },
         },
         null,
-        2
+        2,
       );
 
       const context: RepositoryContext = {

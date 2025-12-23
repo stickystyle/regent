@@ -16,10 +16,6 @@ export {
   ValidationError,
 } from "./types.ts";
 
-export {
-  calculateBackoffDelay,
-  DEFAULT_RETRY_CONFIG,
-  RetryHandler,
-} from "./retry.ts";
+export { calculateBackoffDelay, DEFAULT_RETRY_CONFIG, RetryHandler } from "./retry.ts";
 
 export type { RetryConfig } from "./retry.ts";

@@ -4,7 +4,6 @@
 import { ValidationError } from "../errors/types.ts";
 import type { Message } from "../types/message.ts";
 
-
 /**
  * Raw message event input from Slack ROSI platform.
  *
@@ -63,7 +62,6 @@ export interface ParsedMessageEvent {
   /** Whether message is in a thread */
   isInThread: boolean;
 }
-
 
 /**
  * Result of handling a message event.
@@ -131,7 +129,6 @@ export function isMentionCommand(text: string): boolean {
   const botMentionPattern = /^<@\w+>\s*@regent/;
   return botMentionPattern.test(text);
 }
-
 
 /**
  * Handles message event from Slack.

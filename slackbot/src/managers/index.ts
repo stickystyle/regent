@@ -3,8 +3,7 @@
 
 export { SessionManager } from "./session-manager.ts";
 export { MessageCache } from "./message-cache.ts";
-export type {
-  DatastoreClient,
-  DatastoreResponse,
-} from "./datastore-client.ts";
+export type { DatastoreClient, DatastoreResponse } from "./datastore-client.ts";
 export { MockDatastoreClient } from "./datastore-client.ts";
+export type { CanvasManager } from "./canvas-manager.ts";
+export { CanvasManagerImpl, MockCanvasManager } from "./canvas-manager.ts";

@@ -2,10 +2,10 @@
 // ABOUTME: Validates retry logic, rate limit handling, and threading behavior per Property 11.
 
 import { assertEquals, assertRejects } from "@std/assert";
-import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import {
-  SlackMessagingClientImpl,
   MockSlackMessagingClient,
+  SlackMessagingClientImpl,
 } from "../../src/clients/messaging-client.ts";
 import {
   NetworkTimeoutError,
@@ -209,15 +209,17 @@ describe("SlackMessagingClient", () => {
     beforeEach(() => {
       // Create a mock Slack API object
       mockSlackApi = {
-        chatPostMessage: (params) => Promise.resolve({
-          ok: true,
-          ts: "1234567890.123456",
-          channel: params.channel,
-        }),
-        filesUpload: (_params) => Promise.resolve({
-          ok: true,
-          file: { id: "F1234567890" },
-        }),
+        chatPostMessage: (params) =>
+          Promise.resolve({
+            ok: true,
+            ts: "1234567890.123456",
+            channel: params.channel,
+          }),
+        filesUpload: (_params) =>
+          Promise.resolve({
+            ok: true,
+            file: { id: "F1234567890" },
+          }),
       };
 
       // Create client with mock API
@@ -333,8 +335,7 @@ describe("SlackMessagingClient", () => {
         };
 
         await assertRejects(
-          () =>
-            client.uploadFile("C123", undefined, "test.md", "content"),
+          () => client.uploadFile("C123", undefined, "test.md", "content"),
           SlackRateLimitError,
         );
 
@@ -517,8 +518,7 @@ describe("Property 11: Retry Logic for Messaging Client", () => {
 
   it("should retry exactly 3 times for all transient errors", async () => {
     const transientErrorFactories = [
-      () =>
-        new NetworkTimeoutError("Timeout", "Network timeout", "Retry later"),
+      () => new NetworkTimeoutError("Timeout", "Network timeout", "Retry later"),
       () =>
         new SlackRateLimitError(
           "Rate limited",
@@ -579,10 +579,11 @@ describe("Property 11: Retry Logic for Messaging Client", () => {
       chatPostMessage: () => {
         throw new NetworkTimeoutError("Timeout", "Test", "Retry");
       },
-      filesUpload: () => Promise.resolve({
-        ok: true,
-        file: { id: "F123" },
-      }),
+      filesUpload: () =>
+        Promise.resolve({
+          ok: true,
+          file: { id: "F123" },
+        }),
     };
 
     const client = new SlackMessagingClientImpl(mockApi, {
@@ -617,10 +618,11 @@ describe("Property 11: Retry Logic for Messaging Client", () => {
           channel: "C123",
         });
       },
-      filesUpload: () => Promise.resolve({
-        ok: true,
-        file: { id: "F123" },
-      }),
+      filesUpload: () =>
+        Promise.resolve({
+          ok: true,
+          file: { id: "F123" },
+        }),
     };
 
     const client = new SlackMessagingClientImpl(mockApi);

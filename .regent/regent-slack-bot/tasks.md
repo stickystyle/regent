@@ -86,7 +86,7 @@ Epic: #42
   - Implement Slack client wrapper for chat.postMessage and files.upload
   - _Requirements: 1.1, 5.4, 8.2, 8.3_
 
-- [ ] 10. Implement Canvas management with fallback (#27)
+- [x] 10. Implement Canvas management with fallback (#27)
   - Write tests for createCanvas (content formatting, success/failure)
   - Write tests for updateCanvas (editing, error handling)
   - Write tests for fallback to file upload

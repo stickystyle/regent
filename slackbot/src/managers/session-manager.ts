@@ -219,7 +219,7 @@ export class SessionManager {
     let canvasId: string | undefined;
 
     for (const msg of allMessages) {
-      if (msg.bot_id && msg.blocks) {  // Only check bot messages
+      if (msg.bot_id && msg.blocks) { // Only check bot messages
         for (const block of msg.blocks) {
           const typedBlock = block as { type?: string; file_id?: string };
           if (typedBlock.type === "file" && typedBlock.file_id) {

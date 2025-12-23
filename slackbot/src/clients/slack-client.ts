@@ -151,9 +151,7 @@ export class MockSlackClient implements SlackClient {
     return Promise.resolve({
       messages: pageMessages,
       has_more: hasMore,
-      response_metadata: hasMore
-        ? { next_cursor: String(endIndex) }
-        : undefined,
+      response_metadata: hasMore ? { next_cursor: String(endIndex) } : undefined,
     });
   }
 
