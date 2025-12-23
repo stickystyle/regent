@@ -417,6 +417,91 @@ describe("GitHubClient", () => {
         assertEquals(branch, "main");
       });
 
+      it("should fall back to repo default if config.yml has no parseable target_branch", async () => {
+        mockApi.get = (url) => {
+          if (url.includes(".regent/config.yml")) {
+            // YAML content that doesn't contain target_branch at all
+            const configContent = "# Just a comment\nsome_other_key: value\n";
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  content: btoa(configContent),
+                  encoding: "base64",
+                }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ default_branch: "main" }),
+              { status: 200 },
+            ),
+          );
+        };
+
+        const branch = await client.getDefaultBranch("owner", "repo");
+
+        // Should fall back to repo default when target_branch not found
+        assertEquals(branch, "main");
+      });
+
+      it("should fall back to repo default if config.yml has no target_branch field", async () => {
+        mockApi.get = (url) => {
+          if (url.includes(".regent/config.yml")) {
+            // Valid YAML but no target_branch field
+            const configContent = "other_setting: value\nanother_key: 123\n";
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  content: btoa(configContent),
+                  encoding: "base64",
+                }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ default_branch: "develop" }),
+              { status: 200 },
+            ),
+          );
+        };
+
+        const branch = await client.getDefaultBranch("owner", "repo");
+
+        assertEquals(branch, "develop");
+      });
+
+      it("should handle empty config.yml file", async () => {
+        mockApi.get = (url) => {
+          if (url.includes(".regent/config.yml")) {
+            // Empty content
+            const configContent = "";
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  content: btoa(configContent),
+                  encoding: "base64",
+                }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ default_branch: "master" }),
+              { status: 200 },
+            ),
+          );
+        };
+
+        const branch = await client.getDefaultBranch("owner", "repo");
+
+        assertEquals(branch, "master");
+      });
+
       it("should throw on repository access error", async () => {
         mockApi.get = (_url) =>
           Promise.resolve(
@@ -984,6 +1069,569 @@ describe("GitHubClient", () => {
           "Validation failed",
         );
       });
+
+      it("should create branch with brainstorm/{spec-name} pattern", async () => {
+        let capturedRefPayload: unknown;
+
+        mockApi.get = (url: string) => {
+          if (url.includes("/git/refs/heads/")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ object: { sha: "abc123" } }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ default_branch: "main" }),
+              { status: 200 },
+            ),
+          );
+        };
+
+        mockApi.post = (url: string, body: unknown) => {
+          if (url.includes("/git/refs") && !url.includes("/heads/")) {
+            capturedRefPayload = body;
+          }
+          if (url.includes("/pulls")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1" }),
+                { status: 201 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(JSON.stringify({ sha: "def456" }), { status: 201 }),
+          );
+        };
+
+        const spec: SpecDocument = {
+          title: "My Cool Feature",
+          overview: "Overview",
+          problem_statement: "Problem",
+          goals: [],
+          non_goals: [],
+          personas: [],
+          use_cases: [],
+          technical_details: "",
+          open_questions: [],
+        };
+
+        await client.createPullRequest(
+          "owner",
+          "repo",
+          spec,
+          "https://slack.com/thread/123",
+          [],
+        );
+
+        const payload = capturedRefPayload as { ref: string; sha: string };
+        assertEquals(payload.ref, "refs/heads/brainstorm/my-cool-feature");
+        assertEquals(payload.sha, "abc123");
+      });
+
+      it("should commit file to .regent/{spec-name}/brainstorm.md path", async () => {
+        let capturedFileUrl = "";
+        let capturedFilePayload: unknown;
+
+        mockApi.get = (url: string) => {
+          if (url.includes("/git/refs/heads/")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ object: { sha: "abc123" } }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ default_branch: "main" }),
+              { status: 200 },
+            ),
+          );
+        };
+
+        mockApi.post = (url: string, body: unknown) => {
+          if (url.includes("/contents/.regent/")) {
+            capturedFileUrl = url;
+            capturedFilePayload = body;
+          }
+          if (url.includes("/pulls")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1" }),
+                { status: 201 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(JSON.stringify({ sha: "def456" }), { status: 201 }),
+          );
+        };
+
+        const spec: SpecDocument = {
+          title: "Test Feature",
+          overview: "Overview",
+          problem_statement: "Problem",
+          goals: [],
+          non_goals: [],
+          personas: [],
+          use_cases: [],
+          technical_details: "",
+          open_questions: [],
+        };
+
+        await client.createPullRequest(
+          "owner",
+          "repo",
+          spec,
+          "https://slack.com/thread/123",
+          [],
+        );
+
+        assertEquals(
+          capturedFileUrl.includes(".regent/test-feature/brainstorm.md"),
+          true,
+        );
+
+        const payload = capturedFilePayload as {
+          message: string;
+          content: string;
+          branch: string;
+        };
+        assertEquals(payload.branch, "brainstorm/test-feature");
+        assertEquals(payload.message.includes("Test Feature"), true);
+      });
+
+      it("should base64 encode file content correctly", async () => {
+        let capturedContent = "";
+
+        mockApi.get = (url: string) => {
+          if (url.includes("/git/refs/heads/")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ object: { sha: "abc123" } }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ default_branch: "main" }),
+              { status: 200 },
+            ),
+          );
+        };
+
+        mockApi.post = (url: string, body: unknown) => {
+          if (url.includes("/contents/.regent/")) {
+            const payload = body as { content: string };
+            capturedContent = payload.content;
+          }
+          if (url.includes("/pulls")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1" }),
+                { status: 201 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(JSON.stringify({ sha: "def456" }), { status: 201 }),
+          );
+        };
+
+        const spec: SpecDocument = {
+          title: "Encoding Test",
+          overview: "Test overview content",
+          problem_statement: "Test problem",
+          goals: ["Goal 1"],
+          non_goals: [],
+          personas: [],
+          use_cases: [],
+          technical_details: "",
+          open_questions: [],
+        };
+
+        await client.createPullRequest(
+          "owner",
+          "repo",
+          spec,
+          "https://slack.com/thread/123",
+          [],
+        );
+
+        // Decode the base64 content and verify it contains the spec data
+        const decoded = atob(capturedContent);
+        assertEquals(decoded.includes("# Encoding Test"), true);
+        assertEquals(decoded.includes("Test overview content"), true);
+        assertEquals(decoded.includes("Goal 1"), true);
+      });
+
+      it("should use commit message format: docs: add brainstorm for {title}", async () => {
+        let capturedCommitMessage = "";
+
+        mockApi.get = (url: string) => {
+          if (url.includes("/git/refs/heads/")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ object: { sha: "abc123" } }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ default_branch: "main" }),
+              { status: 200 },
+            ),
+          );
+        };
+
+        mockApi.post = (url: string, body: unknown) => {
+          if (url.includes("/contents/.regent/")) {
+            const payload = body as { message: string };
+            capturedCommitMessage = payload.message;
+          }
+          if (url.includes("/pulls")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1" }),
+                { status: 201 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(JSON.stringify({ sha: "def456" }), { status: 201 }),
+          );
+        };
+
+        const spec: SpecDocument = {
+          title: "User Authentication",
+          overview: "Overview",
+          problem_statement: "Problem",
+          goals: [],
+          non_goals: [],
+          personas: [],
+          use_cases: [],
+          technical_details: "",
+          open_questions: [],
+        };
+
+        await client.createPullRequest(
+          "owner",
+          "repo",
+          spec,
+          "https://slack.com/thread/123",
+          [],
+        );
+
+        assertEquals(capturedCommitMessage, "docs: add brainstorm for User Authentication");
+      });
+
+      it("should use PR title format: Brainstorm: {spec title}", async () => {
+        let capturedPrTitle = "";
+
+        mockApi.get = (url: string) => {
+          if (url.includes("/git/refs/heads/")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ object: { sha: "abc123" } }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ default_branch: "main" }),
+              { status: 200 },
+            ),
+          );
+        };
+
+        mockApi.post = (url: string, body: unknown) => {
+          if (url.includes("/pulls")) {
+            const payload = body as { title: string };
+            capturedPrTitle = payload.title;
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1" }),
+                { status: 201 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(JSON.stringify({ sha: "def456" }), { status: 201 }),
+          );
+        };
+
+        const spec: SpecDocument = {
+          title: "API Refactoring",
+          overview: "Overview",
+          problem_statement: "Problem",
+          goals: [],
+          non_goals: [],
+          personas: [],
+          use_cases: [],
+          technical_details: "",
+          open_questions: [],
+        };
+
+        await client.createPullRequest(
+          "owner",
+          "repo",
+          spec,
+          "https://slack.com/thread/123",
+          [],
+        );
+
+        assertEquals(capturedPrTitle, "Brainstorm: API Refactoring");
+      });
+
+      it("should include thread URL in PR body", async () => {
+        let capturedPrBody = "";
+
+        mockApi.get = (url: string) => {
+          if (url.includes("/git/refs/heads/")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ object: { sha: "abc123" } }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ default_branch: "main" }),
+              { status: 200 },
+            ),
+          );
+        };
+
+        mockApi.post = (url: string, body: unknown) => {
+          if (url.includes("/pulls")) {
+            const payload = body as { body: string };
+            capturedPrBody = payload.body;
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1" }),
+                { status: 201 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(JSON.stringify({ sha: "def456" }), { status: 201 }),
+          );
+        };
+
+        const spec: SpecDocument = {
+          title: "Test",
+          overview: "Overview",
+          problem_statement: "Problem",
+          goals: [],
+          non_goals: [],
+          personas: [],
+          use_cases: [],
+          technical_details: "",
+          open_questions: [],
+        };
+
+        const threadUrl = "https://myorg.slack.com/archives/C123/p456789";
+
+        await client.createPullRequest(
+          "owner",
+          "repo",
+          spec,
+          threadUrl,
+          [],
+        );
+
+        assertEquals(capturedPrBody.includes(threadUrl), true);
+        assertEquals(capturedPrBody.includes("**Thread:**"), true);
+      });
+
+      it("should include participants list in PR body", async () => {
+        let capturedPrBody = "";
+
+        mockApi.get = (url: string) => {
+          if (url.includes("/git/refs/heads/")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ object: { sha: "abc123" } }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ default_branch: "main" }),
+              { status: 200 },
+            ),
+          );
+        };
+
+        mockApi.post = (url: string, body: unknown) => {
+          if (url.includes("/pulls")) {
+            const payload = body as { body: string };
+            capturedPrBody = payload.body;
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1" }),
+                { status: 201 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(JSON.stringify({ sha: "def456" }), { status: 201 }),
+          );
+        };
+
+        const spec: SpecDocument = {
+          title: "Test",
+          overview: "Overview",
+          problem_statement: "Problem",
+          goals: [],
+          non_goals: [],
+          personas: [],
+          use_cases: [],
+          technical_details: "",
+          open_questions: [],
+        };
+
+        await client.createPullRequest(
+          "owner",
+          "repo",
+          spec,
+          "https://slack.com/thread/123",
+          ["@alice", "@bob", "@charlie"],
+        );
+
+        assertEquals(capturedPrBody.includes("**Participants:**"), true);
+        assertEquals(capturedPrBody.includes("@alice"), true);
+        assertEquals(capturedPrBody.includes("@bob"), true);
+        assertEquals(capturedPrBody.includes("@charlie"), true);
+      });
+
+      it("should omit participants section when list is empty", async () => {
+        let capturedPrBody = "";
+
+        mockApi.get = (url: string) => {
+          if (url.includes("/git/refs/heads/")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ object: { sha: "abc123" } }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ default_branch: "main" }),
+              { status: 200 },
+            ),
+          );
+        };
+
+        mockApi.post = (url: string, body: unknown) => {
+          if (url.includes("/pulls")) {
+            const payload = body as { body: string };
+            capturedPrBody = payload.body;
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1" }),
+                { status: 201 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(JSON.stringify({ sha: "def456" }), { status: 201 }),
+          );
+        };
+
+        const spec: SpecDocument = {
+          title: "Test",
+          overview: "Overview",
+          problem_statement: "Problem",
+          goals: [],
+          non_goals: [],
+          personas: [],
+          use_cases: [],
+          technical_details: "",
+          open_questions: [],
+        };
+
+        await client.createPullRequest(
+          "owner",
+          "repo",
+          spec,
+          "https://slack.com/thread/123",
+          [],
+        );
+
+        assertEquals(capturedPrBody.includes("**Participants:**"), false);
+      });
+
+      it("should convert special characters to kebab-case in spec name", async () => {
+        let capturedPrBody: unknown;
+
+        mockApi.get = (url: string) => {
+          if (url.includes("/git/refs/heads/")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ object: { sha: "abc123" } }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ default_branch: "main" }),
+              { status: 200 },
+            ),
+          );
+        };
+
+        mockApi.post = (url: string, body: unknown) => {
+          if (url.includes("/pulls")) {
+            capturedPrBody = body;
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1" }),
+                { status: 201 },
+              ),
+            );
+          }
+          return Promise.resolve(
+            new Response(JSON.stringify({ sha: "def456" }), { status: 201 }),
+          );
+        };
+
+        const spec: SpecDocument = {
+          title: "User's API (v2.0) - Feature!",
+          overview: "Overview",
+          problem_statement: "Problem",
+          goals: [],
+          non_goals: [],
+          personas: [],
+          use_cases: [],
+          technical_details: "",
+          open_questions: [],
+        };
+
+        await client.createPullRequest(
+          "owner",
+          "repo",
+          spec,
+          "https://slack.com/thread/123",
+          [],
+        );
+
+        const body = capturedPrBody as { head: string };
+        // Special chars converted to dashes, consecutive dashes collapsed
+        assertEquals(body.head, "brainstorm/user-s-api-v2-0-feature");
+      });
     });
   });
 });
@@ -1155,5 +1803,385 @@ describe("Property 5: Repository Access Validation", () => {
     for (const repo of accessedRepos) {
       assertEquals(repo, "owner/repo");
     }
+  });
+});
+
+describe("Property 8: PR Creation Conditional", () => {
+  /**
+   * Property 8: If a session is finalized and has a repository configured,
+   * then the system must create a pull request; otherwise it must only mark
+   * the session complete.
+   *
+   * Validates: Requirements 6.2, 6.3, 6.5
+   */
+
+  it("should use custom target_branch from config.yml as PR base", async () => {
+    let capturedPrPayload: unknown;
+
+    const mockApi: MockGitHubApi = {
+      get: (url) => {
+        // Return custom branch from config.yml
+        if (url.includes(".regent/config.yml")) {
+          const configContent = "target_branch: develop\n";
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                content: btoa(configContent),
+                encoding: "base64",
+              }),
+              { status: 200 },
+            ),
+          );
+        }
+        // Return ref for base branch lookup
+        if (url.includes("/git/refs/heads/")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ object: { sha: "abc123" } }),
+              { status: 200 },
+            ),
+          );
+        }
+        // Default repo response (should not be used for branch)
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ default_branch: "main" }),
+            { status: 200 },
+          ),
+        );
+      },
+      post: (url, body) => {
+        if (url.includes("/pulls")) {
+          capturedPrPayload = body;
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1" }),
+              { status: 201 },
+            ),
+          );
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ sha: "def456" }), { status: 201 }),
+        );
+      },
+    };
+
+    const client = new GitHubClientImpl(mockApi, "token");
+
+    const spec: SpecDocument = {
+      title: "Config Test",
+      overview: "Overview",
+      problem_statement: "Problem",
+      goals: [],
+      non_goals: [],
+      personas: [],
+      use_cases: [],
+      technical_details: "",
+      open_questions: [],
+    };
+
+    await client.createPullRequest(
+      "owner",
+      "repo",
+      spec,
+      "https://slack.com/thread/123",
+      ["@alice"],
+    );
+
+    const payload = capturedPrPayload as { base: string };
+    assertEquals(payload.base, "develop");
+  });
+
+  it("should use repo default branch when config.yml is missing", async () => {
+    let capturedPrPayload: unknown;
+
+    const mockApi: MockGitHubApi = {
+      get: (url) => {
+        // config.yml not found
+        if (url.includes(".regent/config.yml")) {
+          return Promise.resolve(
+            new Response("Not Found", { status: 404 }),
+          );
+        }
+        // Return ref for base branch lookup
+        if (url.includes("/git/refs/heads/")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ object: { sha: "abc123" } }),
+              { status: 200 },
+            ),
+          );
+        }
+        // Return repo default branch
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ default_branch: "master" }),
+            { status: 200 },
+          ),
+        );
+      },
+      post: (url, body) => {
+        if (url.includes("/pulls")) {
+          capturedPrPayload = body;
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1" }),
+              { status: 201 },
+            ),
+          );
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ sha: "def456" }), { status: 201 }),
+        );
+      },
+    };
+
+    const client = new GitHubClientImpl(mockApi, "token");
+
+    const spec: SpecDocument = {
+      title: "Fallback Test",
+      overview: "Overview",
+      problem_statement: "Problem",
+      goals: [],
+      non_goals: [],
+      personas: [],
+      use_cases: [],
+      technical_details: "",
+      open_questions: [],
+    };
+
+    await client.createPullRequest(
+      "owner",
+      "repo",
+      spec,
+      "https://slack.com/thread/123",
+      [],
+    );
+
+    const payload = capturedPrPayload as { base: string };
+    assertEquals(payload.base, "master");
+  });
+
+  it("should preserve thread URL in PR metadata", async () => {
+    let capturedPrBody = "";
+
+    const mockApi: MockGitHubApi = {
+      get: (url) => {
+        if (url.includes(".regent/config.yml")) {
+          return Promise.resolve(
+            new Response("Not Found", { status: 404 }),
+          );
+        }
+        if (url.includes("/git/refs/heads/")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ object: { sha: "abc123" } }),
+              { status: 200 },
+            ),
+          );
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ default_branch: "main" }),
+            { status: 200 },
+          ),
+        );
+      },
+      post: (url, body) => {
+        if (url.includes("/pulls")) {
+          const payload = body as { body: string };
+          capturedPrBody = payload.body;
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1" }),
+              { status: 201 },
+            ),
+          );
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ sha: "def456" }), { status: 201 }),
+        );
+      },
+    };
+
+    const client = new GitHubClientImpl(mockApi, "token");
+
+    const spec: SpecDocument = {
+      title: "Metadata Test",
+      overview: "Overview",
+      problem_statement: "Problem",
+      goals: [],
+      non_goals: [],
+      personas: [],
+      use_cases: [],
+      technical_details: "",
+      open_questions: [],
+    };
+
+    const threadUrl = "https://workspace.slack.com/archives/C01ABC/p1234567890";
+
+    await client.createPullRequest(
+      "owner",
+      "repo",
+      spec,
+      threadUrl,
+      ["@user1", "@user2"],
+    );
+
+    // Verify thread URL is preserved
+    assertEquals(capturedPrBody.includes(threadUrl), true);
+    // Verify participants are preserved
+    assertEquals(capturedPrBody.includes("@user1"), true);
+    assertEquals(capturedPrBody.includes("@user2"), true);
+  });
+
+  it("should preserve participants in PR metadata", async () => {
+    let capturedPrBody = "";
+    let capturedFileContent = "";
+
+    const mockApi: MockGitHubApi = {
+      get: (url) => {
+        if (url.includes(".regent/config.yml")) {
+          return Promise.resolve(
+            new Response("Not Found", { status: 404 }),
+          );
+        }
+        if (url.includes("/git/refs/heads/")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ object: { sha: "abc123" } }),
+              { status: 200 },
+            ),
+          );
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ default_branch: "main" }),
+            { status: 200 },
+          ),
+        );
+      },
+      post: (url, body) => {
+        if (url.includes("/contents/.regent/")) {
+          const payload = body as { content: string };
+          capturedFileContent = payload.content;
+        }
+        if (url.includes("/pulls")) {
+          const payload = body as { body: string };
+          capturedPrBody = payload.body;
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1" }),
+              { status: 201 },
+            ),
+          );
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ sha: "def456" }), { status: 201 }),
+        );
+      },
+    };
+
+    const client = new GitHubClientImpl(mockApi, "token");
+
+    const spec: SpecDocument = {
+      title: "Participants Test",
+      overview: "Overview",
+      problem_statement: "Problem",
+      goals: [],
+      non_goals: [],
+      personas: [],
+      use_cases: [],
+      technical_details: "",
+      open_questions: [],
+    };
+
+    const participants = ["@alice", "@bob", "@charlie"];
+
+    await client.createPullRequest(
+      "owner",
+      "repo",
+      spec,
+      "https://slack.com/thread/123",
+      participants,
+    );
+
+    // Verify participants in PR body
+    assertEquals(capturedPrBody.includes("@alice, @bob, @charlie"), true);
+
+    // Verify participants also in brainstorm.md content
+    const decodedContent = atob(capturedFileContent);
+    assertEquals(decodedContent.includes("@alice"), true);
+    assertEquals(decodedContent.includes("@bob"), true);
+    assertEquals(decodedContent.includes("@charlie"), true);
+  });
+
+  it("should create branch from the config-specified base branch", async () => {
+    let baseRefUrl = "";
+
+    const mockApi: MockGitHubApi = {
+      get: (url) => {
+        if (url.includes(".regent/config.yml")) {
+          const configContent = "target_branch: feature-base\n";
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                content: btoa(configContent),
+                encoding: "base64",
+              }),
+              { status: 200 },
+            ),
+          );
+        }
+        if (url.includes("/git/refs/heads/")) {
+          baseRefUrl = url;
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ object: { sha: "abc123" } }),
+              { status: 200 },
+            ),
+          );
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ default_branch: "main" }),
+            { status: 200 },
+          ),
+        );
+      },
+      post: (_url, _body) => {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ html_url: "https://github.com/owner/repo/pull/1", sha: "def456" }),
+            { status: 201 },
+          ),
+        );
+      },
+    };
+
+    const client = new GitHubClientImpl(mockApi, "token");
+
+    const spec: SpecDocument = {
+      title: "Branch Base Test",
+      overview: "Overview",
+      problem_statement: "Problem",
+      goals: [],
+      non_goals: [],
+      personas: [],
+      use_cases: [],
+      technical_details: "",
+      open_questions: [],
+    };
+
+    await client.createPullRequest(
+      "owner",
+      "repo",
+      spec,
+      "https://slack.com/thread/123",
+      [],
+    );
+
+    // Verify it requested the ref for the custom branch
+    assertEquals(baseRefUrl.includes("feature-base"), true);
   });
 });

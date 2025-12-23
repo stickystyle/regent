@@ -111,7 +111,7 @@ Epic: #42
   - Implement RepositoryExplorer with GitHub client integration
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 13. Implement PR creation workflow (#28)
+- [x] 13. Implement PR creation workflow (#28)
   - Write tests for readConfig (parse .regent/config.yml, defaults)
   - Write tests for branch creation (naming, base branch)
   - Write tests for file commit (path .regent/{spec-name}/brainstorm.md)
