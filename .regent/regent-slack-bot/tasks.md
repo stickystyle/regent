@@ -79,7 +79,7 @@ Epic: #42
   - Update tests for conversational approach
   - _Requirements: 3.2, 3.3_
 
-- [ ] 9. Implement Slack messaging utilities (#22)
+- [x] 9. Implement Slack messaging utilities (#22)
   - Write tests for postMessage (simple, threaded, error handling)
   - Write tests for uploadFile (naming, threading, fallback)
   - Write tests for rate limit handling with retry
