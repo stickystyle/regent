@@ -104,7 +104,7 @@ Epic: #42
   - Write property test: **Property 5 - Repository Access Validation**
   - _Requirements: 2.2, 2.4, 10.2, 10.5_
 
-- [ ] 12. Implement repository exploration (#25)
+- [x] 12. Implement repository exploration (#25)
   - Write tests for explore (README detection, manifest parsing, structure summary)
   - Write tests for framework detection (React, FastAPI, Next.js, etc)
   - Write tests for error handling (missing files, private repos)
