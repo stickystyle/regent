@@ -5,6 +5,7 @@ import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { MockSlackClient, type SlackThreadMessage } from "../../src/clients/slack-client.ts";
 import { MockDatastoreClient } from "../../src/managers/datastore-client.ts";
+import { MockEpicManager } from "../../src/managers/epic-manager.ts";
 import { MessageCache } from "../../src/managers/message-cache.ts";
 import { SessionManager } from "../../src/managers/session-manager.ts";
 import { formatSessionId, Phase } from "../../src/types/session.ts";
@@ -1156,6 +1157,417 @@ describe("SessionManager", () => {
       assertEquals(cachedMessages[1].text, "Second");
       assertEquals(cachedMessages[2].text, "Third");
       assertEquals(cachedMessages[3].text, "Fourth");
+    });
+  });
+
+  describe("canPivotToContinue", () => {
+    let mockEpicManager: MockEpicManager;
+
+    beforeEach(() => {
+      mockEpicManager = new MockEpicManager();
+    });
+
+    afterEach(() => {
+      mockEpicManager.clear();
+    });
+
+    it("should detect pivot opportunity when session is Finalized with Epic but no requirements", async () => {
+      // Arrange - Create and finalize a session with Epic
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "owner/repo",
+        "U1234567890",
+      );
+
+      // Set up session as finalized with Epic and brainstorm
+      session.phase = Phase.Finalized;
+      session.epic_number = 42;
+      session.epic_url = "https://github.com/owner/repo/issues/42";
+      session.spec_comment_ids = { brainstorm: 100 };
+      await sessionManager.updateSession(session);
+
+      // Add brainstorm comment to Epic
+      await mockEpicManager.addSpecComment(
+        "owner",
+        "repo",
+        42,
+        "brainstorm",
+        "# Brainstorm content",
+      );
+
+      // Act
+      const result = await sessionManager.canPivotToContinue(
+        session,
+        mockEpicManager,
+      );
+
+      // Assert
+      assertEquals(result.canContinue, true);
+      assertEquals(result.nextPhase, "requirements");
+      assertEquals(result.currentSpec, "# Brainstorm content");
+    });
+
+    it("should detect pivot opportunity when session is Finalized with Epic but no design", async () => {
+      // Arrange - Create and finalize a session with Epic and requirements
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "owner/repo",
+        "U1234567890",
+      );
+
+      session.phase = Phase.Finalized;
+      session.epic_number = 42;
+      session.epic_url = "https://github.com/owner/repo/issues/42";
+      session.spec_comment_ids = { brainstorm: 100, requirements: 101 };
+      await sessionManager.updateSession(session);
+
+      // Add both brainstorm and requirements comments to Epic
+      await mockEpicManager.addSpecComment(
+        "owner",
+        "repo",
+        42,
+        "brainstorm",
+        "# Brainstorm content",
+      );
+      await mockEpicManager.addSpecComment(
+        "owner",
+        "repo",
+        42,
+        "requirements",
+        "# Requirements content",
+      );
+
+      // Act
+      const result = await sessionManager.canPivotToContinue(
+        session,
+        mockEpicManager,
+      );
+
+      // Assert
+      assertEquals(result.canContinue, true);
+      assertEquals(result.nextPhase, "design");
+    });
+
+    it("should not allow pivot when session is not Finalized", async () => {
+      // Arrange - Create session in Questioning phase
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "owner/repo",
+        "U1234567890",
+      );
+
+      // Act
+      const result = await sessionManager.canPivotToContinue(
+        session,
+        mockEpicManager,
+      );
+
+      // Assert
+      assertEquals(result.canContinue, false);
+      assertEquals(result.reason, "Session is not finalized");
+    });
+
+    it("should not allow pivot when no Epic exists", async () => {
+      // Arrange - Create finalized session without Epic
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "owner/repo",
+        "U1234567890",
+      );
+
+      session.phase = Phase.Finalized;
+      await sessionManager.updateSession(session);
+
+      // Act
+      const result = await sessionManager.canPivotToContinue(
+        session,
+        mockEpicManager,
+      );
+
+      // Assert
+      assertEquals(result.canContinue, false);
+      assertEquals(result.reason, "No Epic associated with session");
+    });
+
+    it("should not allow pivot when all spec phases are complete", async () => {
+      // Arrange - Create finalized session with all spec phases complete
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "owner/repo",
+        "U1234567890",
+      );
+
+      session.phase = Phase.Finalized;
+      session.epic_number = 42;
+      session.epic_url = "https://github.com/owner/repo/issues/42";
+      session.spec_comment_ids = {
+        brainstorm: 100,
+        requirements: 101,
+        design: 102,
+      };
+      await sessionManager.updateSession(session);
+
+      // Add all spec comments to Epic
+      await mockEpicManager.addSpecComment(
+        "owner",
+        "repo",
+        42,
+        "brainstorm",
+        "# Brainstorm",
+      );
+      await mockEpicManager.addSpecComment(
+        "owner",
+        "repo",
+        42,
+        "requirements",
+        "# Requirements",
+      );
+      await mockEpicManager.addSpecComment("owner", "repo", 42, "design", "# Design");
+
+      // Act
+      const result = await sessionManager.canPivotToContinue(
+        session,
+        mockEpicManager,
+      );
+
+      // Assert
+      assertEquals(result.canContinue, false);
+      assertEquals(result.reason, "All spec phases are complete");
+    });
+
+    it("should not allow pivot when session has no repository", async () => {
+      // Arrange - Create finalized session without repository
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "", // Empty repository
+        "U1234567890",
+      );
+
+      session.phase = Phase.Finalized;
+      session.epic_number = 42;
+      await sessionManager.updateSession(session);
+
+      // Act
+      const result = await sessionManager.canPivotToContinue(
+        session,
+        mockEpicManager,
+      );
+
+      // Assert
+      assertEquals(result.canContinue, false);
+      assertEquals(result.reason, "No Epic associated with session");
+    });
+
+    it("should not allow pivot when repository format is malformed", async () => {
+      // Arrange - Create finalized session with malformed repository
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "invalid-repo-format", // No slash separator
+        "U1234567890",
+      );
+
+      session.phase = Phase.Finalized;
+      session.epic_number = 42;
+      session.epic_url = "https://github.com/invalid/issues/42";
+      session.spec_comment_ids = { brainstorm: 100 };
+      await sessionManager.updateSession(session);
+
+      // Act
+      const result = await sessionManager.canPivotToContinue(
+        session,
+        mockEpicManager,
+      );
+
+      // Assert
+      assertEquals(result.canContinue, false);
+      assertEquals(
+        result.reason?.includes("Invalid repository format"),
+        true,
+        "Reason should mention invalid repository format",
+      );
+    });
+
+    it("should not allow pivot when repository has empty owner or repo", async () => {
+      // Arrange - Create finalized session with malformed repository (empty parts)
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "/repo", // Empty owner
+        "U1234567890",
+      );
+
+      session.phase = Phase.Finalized;
+      session.epic_number = 42;
+      session.epic_url = "https://github.com/invalid/issues/42";
+      session.spec_comment_ids = { brainstorm: 100 };
+      await sessionManager.updateSession(session);
+
+      // Act
+      const result = await sessionManager.canPivotToContinue(
+        session,
+        mockEpicManager,
+      );
+
+      // Assert
+      assertEquals(result.canContinue, false);
+      assertEquals(
+        result.reason?.includes("Invalid repository format"),
+        true,
+        "Reason should mention invalid repository format",
+      );
+    });
+
+    it("should return requirements content as currentSpec when pivoting to design phase", async () => {
+      // Arrange - Create and finalize a session with Epic and requirements
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "owner/repo",
+        "U1234567890",
+      );
+
+      session.phase = Phase.Finalized;
+      session.epic_number = 42;
+      session.epic_url = "https://github.com/owner/repo/issues/42";
+      session.spec_comment_ids = { brainstorm: 100, requirements: 101 };
+      await sessionManager.updateSession(session);
+
+      // Add both brainstorm and requirements comments to Epic
+      await mockEpicManager.addSpecComment(
+        "owner",
+        "repo",
+        42,
+        "brainstorm",
+        "# Brainstorm content",
+      );
+      await mockEpicManager.addSpecComment(
+        "owner",
+        "repo",
+        42,
+        "requirements",
+        "# Requirements content\n\nThis is the requirements spec.",
+      );
+
+      // Act
+      const result = await sessionManager.canPivotToContinue(
+        session,
+        mockEpicManager,
+      );
+
+      // Assert
+      assertEquals(result.canContinue, true);
+      assertEquals(result.nextPhase, "design");
+      assertEquals(
+        result.currentSpec,
+        "# Requirements content\n\nThis is the requirements spec.",
+        "currentSpec should contain requirements content for design phase",
+      );
+    });
+  });
+
+  describe("resumeSession", () => {
+    it("should resume session by transitioning back to Questioning phase", async () => {
+      // Arrange - Create and finalize a session
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "owner/repo",
+        "U1234567890",
+      );
+
+      session.phase = Phase.Finalized;
+      session.epic_number = 42;
+      session.epic_url = "https://github.com/owner/repo/issues/42";
+      session.spec_comment_ids = { brainstorm: 100 };
+      await sessionManager.updateSession(session);
+
+      // Act
+      const resumedSession = await sessionManager.resumeSession(session);
+
+      // Assert
+      assertEquals(resumedSession.phase, Phase.Questioning);
+      assertEquals(resumedSession.epic_number, 42);
+      assertEquals(resumedSession.epic_url, "https://github.com/owner/repo/issues/42");
+      assertEquals(resumedSession.spec_comment_ids?.brainstorm, 100);
+    });
+
+    it("should preserve all Epic fields when resuming", async () => {
+      // Arrange
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "owner/repo",
+        "U1234567890",
+      );
+
+      session.phase = Phase.Finalized;
+      session.epic_number = 42;
+      session.epic_url = "https://github.com/owner/repo/issues/42";
+      session.spec_comment_ids = { brainstorm: 100, requirements: 101 };
+      await sessionManager.updateSession(session);
+
+      // Act
+      const resumedSession = await sessionManager.resumeSession(session);
+
+      // Assert - All Epic fields preserved
+      assertEquals(resumedSession.epic_number, 42);
+      assertEquals(resumedSession.epic_url, "https://github.com/owner/repo/issues/42");
+      assertEquals(resumedSession.spec_comment_ids?.brainstorm, 100);
+      assertEquals(resumedSession.spec_comment_ids?.requirements, 101);
+      assertEquals(resumedSession.repository, "owner/repo");
+    });
+
+    it("should persist resumed session to datastore", async () => {
+      // Arrange
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "owner/repo",
+        "U1234567890",
+      );
+
+      session.phase = Phase.Finalized;
+      session.epic_number = 42;
+      await sessionManager.updateSession(session);
+
+      // Act
+      await sessionManager.resumeSession(session);
+
+      // Assert - Load from datastore to verify persistence
+      const loadedSession = await sessionManager.loadSession(channelId, threadTs);
+      assertEquals(loadedSession?.phase, Phase.Questioning);
+      assertEquals(loadedSession?.epic_number, 42);
     });
   });
 });

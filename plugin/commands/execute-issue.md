@@ -31,7 +31,72 @@ Implement a task from a GitHub issue, working on a shared feature branch with a 
 3. If no `regent` label, warn user this may not be a Regent-managed issue
 
 4. Verify `.regent/{spec-name}/` exists locally
-   - If not, ask user if they want to proceed anyway
+   - If not, proceed to Phase 1.5 to download specs from Epic
+
+## Phase 1.5: Epic Detection and Spec Download
+
+If the local spec directory does not exist, attempt to download specs from the parent Epic.
+
+1. **Get repository info:**
+   ```bash
+   OWNER=$(gh repo view --json owner --jq '.owner.login')
+   REPO=$(gh repo view --json name --jq '.name')
+   ```
+
+2. **Get spec name from task issue labels:**
+   ```bash
+   SPEC_NAME=$(gh issue view {N} --json labels \
+     --jq '.labels[] | select(.name | startswith("spec:")) | .name | sub("spec:"; "")')
+   ```
+
+3. **Find parent Epic with same spec label:**
+   ```bash
+   EPIC=$(gh issue list --label "regent:epic" --label "spec:${SPEC_NAME}" \
+     --json number --jq '.[0].number')
+   ```
+
+4. **If Epic found, download all spec documents:**
+
+   a. Create local spec directory:
+      ```bash
+      mkdir -p .regent/${SPEC_NAME}
+      ```
+
+   b. Download brainstorm:
+      ```bash
+      CONTENT=$(gh api repos/${OWNER}/${REPO}/issues/${EPIC}/comments \
+        --jq '.[] | select(.body | contains("<!-- REGENT_SPEC:brainstorm -->")) | .body')
+      ```
+      - Extract content from inside the `<details>` section (between `</summary>` and `</details>`)
+      - Write to `.regent/${SPEC_NAME}/brainstorm.md`
+
+   c. Download requirements:
+      ```bash
+      CONTENT=$(gh api repos/${OWNER}/${REPO}/issues/${EPIC}/comments \
+        --jq '.[] | select(.body | contains("<!-- REGENT_SPEC:requirements -->")) | .body')
+      ```
+      - Extract content from inside the `<details>` section
+      - Write to `.regent/${SPEC_NAME}/requirements.md`
+
+   d. Download design:
+      ```bash
+      CONTENT=$(gh api repos/${OWNER}/${REPO}/issues/${EPIC}/comments \
+        --jq '.[] | select(.body | contains("<!-- REGENT_SPEC:design -->")) | .body')
+      ```
+      - Extract content from inside the `<details>` section
+      - Write to `.regent/${SPEC_NAME}/design.md`
+
+   e. Report to user:
+      ```
+      Downloaded specs from Epic #{EPIC} to .regent/${SPEC_NAME}/
+      - brainstorm.md
+      - requirements.md
+      - design.md
+      ```
+
+5. **If no Epic found:**
+   - Warn user: "Could not find parent Epic for spec '${SPEC_NAME}'. Specs are not available locally."
+   - Ask user if they want to proceed anyway (the task may still be implementable from issue context alone)
 
 ## Phase 2: Feature Branch Setup
 

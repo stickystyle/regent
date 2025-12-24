@@ -397,6 +397,24 @@ Some technical details here.
         assertEquals(updatedContent.includes("---"), true);
         assertEquals(updatedContent.includes("# Feature Specification"), true);
       });
+
+      it("should store epic_number and epic_url in session after finalization", async () => {
+        await handleFinalization(channelId, threadTs, dependencies);
+
+        const updatedSession = await mockDatastore.getSession(sessionId);
+        assertEquals(updatedSession?.epic_number, 1);
+        assertEquals(
+          updatedSession?.epic_url,
+          "https://github.com/stickystyle/regent/issues/1",
+        );
+      });
+
+      it("should store brainstorm comment_id in spec_comment_ids", async () => {
+        await handleFinalization(channelId, threadTs, dependencies);
+
+        const updatedSession = await mockDatastore.getSession(sessionId);
+        assertEquals(updatedSession?.spec_comment_ids?.brainstorm, 1);
+      });
     });
 
     describe("error handling", () => {

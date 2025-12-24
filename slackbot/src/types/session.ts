@@ -81,6 +81,31 @@ export interface Session {
    * Example: "2025-01-31T00:00:00.000Z"
    */
   ttl: string;
+
+  /**
+   * GitHub Epic issue number (set during finalization).
+   *
+   * Example: 42
+   */
+  epic_number?: number;
+
+  /**
+   * Full URL to GitHub Epic issue (set during finalization).
+   *
+   * Example: "https://github.com/owner/repo/issues/42"
+   */
+  epic_url?: string;
+
+  /**
+   * Comment IDs for each spec type stored on the Epic.
+   *
+   * Allows future updates to existing spec comments on the Epic.
+   */
+  spec_comment_ids?: {
+    brainstorm?: number;
+    requirements?: number;
+    design?: number;
+  };
 }
 
 /**

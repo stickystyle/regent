@@ -171,7 +171,7 @@ export async function handleFinalization(
     const epic = await epicManager.createEpic(owner, repo, title, summary);
 
     // Step 5: Add brainstorm as comment on Epic
-    await epicManager.addSpecComment(
+    const brainstormCommentId = await epicManager.addSpecComment(
       owner,
       repo,
       epic.number,
@@ -180,13 +180,19 @@ export async function handleFinalization(
     );
 
     // Step 6: Update Canvas with Epic URL for persistent reference
-    const updatedCanvasContent = `**GitHub Epic:** [#${epic.number}](${epic.url})\n\n---\n\n${canvasContent}`;
+    const updatedCanvasContent =
+      `**GitHub Epic:** [#${epic.number}](${epic.url})\n\n---\n\n${canvasContent}`;
     await canvasManager.updateCanvasContent(session.canvas_id, updatedCanvasContent);
 
-    // Step 7: Update session to Finalized phase
+    // Step 7: Update session to Finalized phase with Epic metadata
     const updatedSession: Session = {
       ...session,
       phase: Phase.Finalized,
+      epic_number: epic.number,
+      epic_url: epic.url,
+      spec_comment_ids: {
+        brainstorm: brainstormCommentId,
+      },
     };
     await sessionManager.updateSession(updatedSession);
 

@@ -361,6 +361,15 @@ export class MockEpicManager implements EpicManager {
   }
 
   /**
+   * Alias for setGetSpecCommentsError for test readability.
+   *
+   * @param error - Error to throw on next getSpecComments call
+   */
+  setErrorOnGetSpecComments(error: Error): void {
+    this.setGetSpecCommentsError(error);
+  }
+
+  /**
    * Get all epics created through this mock manager.
    */
   getCreatedEpics(): Array<{

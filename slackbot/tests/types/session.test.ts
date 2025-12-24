@@ -274,4 +274,107 @@ describe("Session Type", () => {
       assertEquals(isNaN(parsedTtl.getTime()), false);
     });
   });
+
+  describe("Epic fields", () => {
+    it("should allow optional epic_number field", () => {
+      const session: Session = {
+        session_id: "C1234567890:1234567890.123456",
+        phase: Phase.Finalized,
+        initiator_user_id: "U1234567890",
+        confidence_score: 95,
+        created_at: new Date().toISOString(),
+        ttl: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        epic_number: 42,
+      };
+
+      assertEquals(session.epic_number, 42);
+    });
+
+    it("should allow optional epic_url field", () => {
+      const session: Session = {
+        session_id: "C1234567890:1234567890.123456",
+        phase: Phase.Finalized,
+        initiator_user_id: "U1234567890",
+        confidence_score: 95,
+        created_at: new Date().toISOString(),
+        ttl: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        epic_url: "https://github.com/owner/repo/issues/42",
+      };
+
+      assertEquals(session.epic_url, "https://github.com/owner/repo/issues/42");
+    });
+
+    it("should allow optional spec_comment_ids field with brainstorm", () => {
+      const session: Session = {
+        session_id: "C1234567890:1234567890.123456",
+        phase: Phase.Finalized,
+        initiator_user_id: "U1234567890",
+        confidence_score: 95,
+        created_at: new Date().toISOString(),
+        ttl: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        spec_comment_ids: {
+          brainstorm: 12345,
+        },
+      };
+
+      assertEquals(session.spec_comment_ids?.brainstorm, 12345);
+    });
+
+    it("should allow spec_comment_ids with requirements and design", () => {
+      const session: Session = {
+        session_id: "C1234567890:1234567890.123456",
+        phase: Phase.Finalized,
+        initiator_user_id: "U1234567890",
+        confidence_score: 95,
+        created_at: new Date().toISOString(),
+        ttl: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        spec_comment_ids: {
+          brainstorm: 100,
+          requirements: 101,
+          design: 102,
+        },
+      };
+
+      assertEquals(session.spec_comment_ids?.brainstorm, 100);
+      assertEquals(session.spec_comment_ids?.requirements, 101);
+      assertEquals(session.spec_comment_ids?.design, 102);
+    });
+
+    it("should allow session with all epic fields set", () => {
+      const session: Session = {
+        session_id: "C1234567890:1234567890.123456",
+        repository: "owner/repo",
+        phase: Phase.Finalized,
+        initiator_user_id: "U1234567890",
+        canvas_id: "F1234567890",
+        confidence_score: 95,
+        created_at: new Date().toISOString(),
+        ttl: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        epic_number: 42,
+        epic_url: "https://github.com/owner/repo/issues/42",
+        spec_comment_ids: {
+          brainstorm: 12345,
+        },
+      };
+
+      assertEquals(session.epic_number, 42);
+      assertEquals(session.epic_url, "https://github.com/owner/repo/issues/42");
+      assertEquals(session.spec_comment_ids?.brainstorm, 12345);
+    });
+
+    it("should work without epic fields (undefined)", () => {
+      const session: Session = {
+        session_id: "C1234567890:1234567890.123456",
+        phase: Phase.Review,
+        initiator_user_id: "U1234567890",
+        confidence_score: 80,
+        created_at: new Date().toISOString(),
+        ttl: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      };
+
+      assertEquals(session.epic_number, undefined);
+      assertEquals(session.epic_url, undefined);
+      assertEquals(session.spec_comment_ids, undefined);
+    });
+  });
 });

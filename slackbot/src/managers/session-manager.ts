@@ -2,12 +2,24 @@
 // ABOUTME: Implements Property 9 - TTL Enforcement and Property 6 - Session Resumption via history rebuild.
 
 import type { SlackClient, SlackThreadMessage } from "../clients/slack-client.ts";
+import { parseRepository } from "../handlers/finalization-handler.ts";
 import type { Message } from "../types/message.ts";
 import { isOfficialAnswer } from "../types/message.ts";
 import type { Session } from "../types/session.ts";
 import { formatSessionId, Phase } from "../types/session.ts";
 import type { DatastoreClient } from "./datastore-client.ts";
+import type { EpicManager } from "./epic-manager.ts";
 import type { MessageCache } from "./message-cache.ts";
+
+/**
+ * Result of checking if a session can pivot to continue.
+ */
+export interface PivotCheckResult {
+  canContinue: boolean;
+  reason?: string;
+  nextPhase?: "requirements" | "design";
+  currentSpec?: string;
+}
 
 /**
  * Number of days until a session expires.
@@ -268,5 +280,97 @@ export class SessionManager {
     }
 
     return session;
+  }
+
+  /**
+   * Check if a Finalized session can continue for additional spec phases.
+   *
+   * A session can pivot if:
+   * - Session phase is Finalized
+   * - Session has epic_number set
+   * - Some spec phases haven't been completed yet
+   *
+   * @param session - The session to check
+   * @param epicManager - Epic manager to query for existing spec comments
+   * @returns Result indicating whether pivot is possible and next phase
+   */
+  async canPivotToContinue(
+    session: Session,
+    epicManager: EpicManager,
+  ): Promise<PivotCheckResult> {
+    // Check session is Finalized
+    if (session.phase !== Phase.Finalized) {
+      return { canContinue: false, reason: "Session is not finalized" };
+    }
+
+    // Check epic_number exists
+    if (!session.epic_number || !session.repository) {
+      return { canContinue: false, reason: "No Epic associated with session" };
+    }
+
+    // Parse repository with validation
+    let owner: string;
+    let repo: string;
+    try {
+      const parsed = parseRepository(session.repository);
+      owner = parsed.owner;
+      repo = parsed.repo;
+    } catch {
+      return {
+        canContinue: false,
+        reason: `Invalid repository format: ${session.repository}`,
+      };
+    }
+
+    // Check which spec phases are missing on Epic
+    const specComments = await epicManager.getSpecComments(
+      owner,
+      repo,
+      session.epic_number,
+    );
+
+    // Determine next phase
+    if (!specComments.has("requirements")) {
+      const brainstorm = specComments.get("brainstorm");
+      return {
+        canContinue: true,
+        nextPhase: "requirements",
+        currentSpec: brainstorm?.content,
+      };
+    }
+
+    if (!specComments.has("design")) {
+      const requirements = specComments.get("requirements");
+      return {
+        canContinue: true,
+        nextPhase: "design",
+        currentSpec: requirements?.content,
+      };
+    }
+
+    // All phases complete
+    return {
+      canContinue: false,
+      reason: "All spec phases are complete",
+    };
+  }
+
+  /**
+   * Resume a Finalized session for continued spec work.
+   *
+   * Transitions the session back to Questioning phase and optionally
+   * acknowledges if the spec was edited directly on GitHub since finalization.
+   *
+   * @param session - The session to resume
+   * @returns The updated session
+   */
+  async resumeSession(session: Session): Promise<Session> {
+    const updatedSession: Session = {
+      ...session,
+      phase: Phase.Questioning,
+      // Keep epic fields intact for continued storage
+    };
+    await this.updateSession(updatedSession);
+    return updatedSession;
   }
 }

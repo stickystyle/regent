@@ -67,5 +67,24 @@ export const SessionsDatastore = DefineDatastore({
     ttl: {
       type: Schema.types.string,
     },
+    /**
+     * GitHub Epic issue number (set during finalization)
+     */
+    epic_number: {
+      type: Schema.types.number,
+    },
+    /**
+     * Full URL to GitHub Epic issue (set during finalization)
+     */
+    epic_url: {
+      type: Schema.types.string,
+    },
+    /**
+     * JSON-serialized comment IDs for each spec type stored on the Epic.
+     * Stored as JSON string: {"brainstorm":123,"requirements":456}
+     */
+    spec_comment_ids: {
+      type: Schema.types.string,
+    },
   },
 });
