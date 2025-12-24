@@ -7,3 +7,11 @@ export type { DatastoreClient, DatastoreResponse } from "./datastore-client.ts";
 export { MockDatastoreClient } from "./datastore-client.ts";
 export type { CanvasManager } from "./canvas-manager.ts";
 export { CanvasManagerImpl, MockCanvasManager } from "./canvas-manager.ts";
+export type { EpicManager, SpecType } from "./epic-manager.ts";
+export {
+  EpicManagerImpl,
+  extractSpecContent,
+  formatSpecComment,
+  MockEpicManager,
+  parseSpecMarker,
+} from "./epic-manager.ts";

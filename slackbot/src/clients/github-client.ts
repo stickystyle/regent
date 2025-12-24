@@ -4,6 +4,7 @@
 import { RetryHandler } from "../errors/retry.ts";
 import type { RetryConfig } from "../errors/retry.ts";
 import { GitHubAccessError, GitHubRateLimitError, NetworkTimeoutError } from "../errors/types.ts";
+import type { GitHubComment, GitHubIssue } from "../types/github.ts";
 import { Framework, RelevantFile, RepositoryContext } from "../types/repository-context.ts";
 import { SpecDocument } from "../types/spec-document.ts";
 
@@ -59,6 +60,84 @@ export interface GitHubClient {
    * @throws GitHubAccessError if token lacks permissions
    */
   checkAccess(owner: string, repo: string): Promise<boolean>;
+
+  /**
+   * Create a new issue in the repository.
+   *
+   * @param owner - Repository owner
+   * @param repo - Repository name
+   * @param title - Issue title
+   * @param body - Issue body in markdown
+   * @param labels - Optional labels to apply to the issue
+   * @returns Created issue number and URL
+   */
+  createIssue(
+    owner: string,
+    repo: string,
+    title: string,
+    body: string,
+    labels?: string[],
+  ): Promise<{ number: number; url: string }>;
+
+  /**
+   * Get an issue by number.
+   *
+   * @param owner - Repository owner
+   * @param repo - Repository name
+   * @param issueNumber - Issue number
+   * @returns Issue details
+   */
+  getIssue(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+  ): Promise<GitHubIssue>;
+
+  /**
+   * Get all comments on an issue.
+   *
+   * @param owner - Repository owner
+   * @param repo - Repository name
+   * @param issueNumber - Issue number
+   * @returns Array of comments on the issue
+   */
+  getIssueComments(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+  ): Promise<GitHubComment[]>;
+
+  /**
+   * Create a comment on an issue.
+   *
+   * @param owner - Repository owner
+   * @param repo - Repository name
+   * @param issueNumber - Issue number
+   * @param body - Comment body in markdown
+   * @returns Created comment
+   */
+  createIssueComment(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    body: string,
+  ): Promise<GitHubComment>;
+
+  /**
+   * Update an existing issue comment.
+   *
+   * @param owner - Repository owner
+   * @param repo - Repository name
+   * @param commentId - Comment ID to update
+   * @param body - Updated comment body in markdown
+   * @returns Updated comment
+   */
+  updateIssueComment(
+    owner: string,
+    repo: string,
+    commentId: number,
+    body: string,
+  ): Promise<GitHubComment>;
 }
 
 /**
@@ -71,6 +150,33 @@ export class MockGitHubClient implements GitHubClient {
   private checkAccessError: Error | null = null;
   private getDefaultBranchError: Error | null = null;
   private createPullRequestError: Error | null = null;
+  private createIssueError: Error | null = null;
+  private getIssueError: Error | null = null;
+  private getIssueCommentsError: Error | null = null;
+  private createIssueCommentError: Error | null = null;
+  private updateIssueCommentError: Error | null = null;
+
+  private issueCounter = 0;
+  private commentCounter = 0;
+  private createdIssues: Array<{
+    owner: string;
+    repo: string;
+    title: string;
+    body: string;
+    labels?: string[];
+  }> = [];
+  private createdComments: Array<{
+    owner: string;
+    repo: string;
+    issueNumber: number;
+    body: string;
+  }> = [];
+  private updatedComments: Array<{
+    owner: string;
+    repo: string;
+    commentId: number;
+    body: string;
+  }> = [];
 
   /**
    * Configure an error to be thrown by exploreRepository.
@@ -109,13 +215,111 @@ export class MockGitHubClient implements GitHubClient {
   }
 
   /**
-   * Clear all configured errors.
+   * Configure an error to be thrown by createIssue.
+   *
+   * @param error - Error to throw on next createIssue call
+   */
+  setCreateIssueError(error: Error): void {
+    this.createIssueError = error;
+  }
+
+  /**
+   * Configure an error to be thrown by getIssue.
+   *
+   * @param error - Error to throw on next getIssue call
+   */
+  setGetIssueError(error: Error): void {
+    this.getIssueError = error;
+  }
+
+  /**
+   * Configure an error to be thrown by getIssueComments.
+   *
+   * @param error - Error to throw on next getIssueComments call
+   */
+  setGetIssueCommentsError(error: Error): void {
+    this.getIssueCommentsError = error;
+  }
+
+  /**
+   * Configure an error to be thrown by createIssueComment.
+   *
+   * @param error - Error to throw on next createIssueComment call
+   */
+  setCreateIssueCommentError(error: Error): void {
+    this.createIssueCommentError = error;
+  }
+
+  /**
+   * Configure an error to be thrown by updateIssueComment.
+   *
+   * @param error - Error to throw on next updateIssueComment call
+   */
+  setUpdateIssueCommentError(error: Error): void {
+    this.updateIssueCommentError = error;
+  }
+
+  /**
+   * Get all issues created through this mock client.
+   *
+   * @returns Array of created issue records
+   */
+  getCreatedIssues(): Array<{
+    owner: string;
+    repo: string;
+    title: string;
+    body: string;
+    labels?: string[];
+  }> {
+    return [...this.createdIssues];
+  }
+
+  /**
+   * Get all comments created through this mock client.
+   *
+   * @returns Array of created comment records
+   */
+  getCreatedComments(): Array<{
+    owner: string;
+    repo: string;
+    issueNumber: number;
+    body: string;
+  }> {
+    return [...this.createdComments];
+  }
+
+  /**
+   * Get all comments updated through this mock client.
+   *
+   * @returns Array of updated comment records
+   */
+  getUpdatedComments(): Array<{
+    owner: string;
+    repo: string;
+    commentId: number;
+    body: string;
+  }> {
+    return [...this.updatedComments];
+  }
+
+  /**
+   * Clear all configured errors and recorded operations.
    */
   clear(): void {
     this.exploreError = null;
     this.checkAccessError = null;
     this.getDefaultBranchError = null;
     this.createPullRequestError = null;
+    this.createIssueError = null;
+    this.getIssueError = null;
+    this.getIssueCommentsError = null;
+    this.createIssueCommentError = null;
+    this.updateIssueCommentError = null;
+    this.issueCounter = 0;
+    this.commentCounter = 0;
+    this.createdIssues = [];
+    this.createdComments = [];
+    this.updatedComments = [];
   }
 
   checkAccess(_owner: string, _repo: string): Promise<boolean> {
@@ -158,6 +362,131 @@ export class MockGitHubClient implements GitHubClient {
     }
     return Promise.resolve(`https://github.com/${owner}/${repo}/pull/1`);
   }
+
+  createIssue(
+    owner: string,
+    repo: string,
+    title: string,
+    body: string,
+    labels?: string[],
+  ): Promise<{ number: number; url: string }> {
+    if (this.createIssueError !== null) {
+      return Promise.reject(this.createIssueError);
+    }
+
+    // Record the operation
+    this.createdIssues.push({ owner, repo, title, body, labels });
+
+    // Generate mock issue number
+    this.issueCounter++;
+    const issueNumber = this.issueCounter;
+
+    return Promise.resolve({
+      number: issueNumber,
+      url: `https://github.com/${owner}/${repo}/issues/${issueNumber}`,
+    });
+  }
+
+  getIssue(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+  ): Promise<GitHubIssue> {
+    if (this.getIssueError !== null) {
+      return Promise.reject(this.getIssueError);
+    }
+
+    return Promise.resolve({
+      number: issueNumber,
+      title: `Mock Issue #${issueNumber}`,
+      body: "Mock issue body",
+      state: "open",
+      html_url: `https://github.com/${owner}/${repo}/issues/${issueNumber}`,
+      user: { id: 1, login: "mock-user" },
+      labels: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  getIssueComments(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+  ): Promise<GitHubComment[]> {
+    if (this.getIssueCommentsError !== null) {
+      return Promise.reject(this.getIssueCommentsError);
+    }
+
+    // Return comments that were created for this issue
+    const issueComments = this.createdComments
+      .filter(
+        (c) => c.owner === owner && c.repo === repo && c.issueNumber === issueNumber,
+      )
+      .map((c, index) => ({
+        id: index + 1,
+        body: c.body,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        user: { id: 1, login: "mock-user" },
+        html_url: `https://github.com/${owner}/${repo}/issues/${issueNumber}#issuecomment-${
+          index + 1
+        }`,
+      }));
+
+    return Promise.resolve(issueComments);
+  }
+
+  createIssueComment(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    body: string,
+  ): Promise<GitHubComment> {
+    if (this.createIssueCommentError !== null) {
+      return Promise.reject(this.createIssueCommentError);
+    }
+
+    // Record the operation
+    this.createdComments.push({ owner, repo, issueNumber, body });
+
+    // Generate mock comment ID
+    this.commentCounter++;
+    const commentId = this.commentCounter;
+
+    return Promise.resolve({
+      id: commentId,
+      body,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      user: { id: 1, login: "mock-user" },
+      html_url:
+        `https://github.com/${owner}/${repo}/issues/${issueNumber}#issuecomment-${commentId}`,
+    });
+  }
+
+  updateIssueComment(
+    owner: string,
+    repo: string,
+    commentId: number,
+    body: string,
+  ): Promise<GitHubComment> {
+    if (this.updateIssueCommentError !== null) {
+      return Promise.reject(this.updateIssueCommentError);
+    }
+
+    // Record the operation
+    this.updatedComments.push({ owner, repo, commentId, body });
+
+    return Promise.resolve({
+      id: commentId,
+      body,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      user: { id: 1, login: "mock-user" },
+      html_url: `https://github.com/${owner}/${repo}/issues/1#issuecomment-${commentId}`,
+    });
+  }
 }
 
 /**
@@ -173,7 +502,7 @@ export class GitHubClientImpl implements GitHubClient {
   /**
    * Create a new GitHub client.
    *
-   * @param githubApi - GitHub API object with get/post methods
+   * @param githubApi - GitHub API object with get/post/patch methods
    * @param token - GitHub personal access token
    * @param retryConfig - Optional retry configuration (defaults to 3 attempts)
    */
@@ -181,6 +510,11 @@ export class GitHubClientImpl implements GitHubClient {
     private readonly githubApi: {
       get: (url: string, headers?: Record<string, string>) => Promise<Response>;
       post: (
+        url: string,
+        body: unknown,
+        headers?: Record<string, string>,
+      ) => Promise<Response>;
+      patch: (
         url: string,
         body: unknown,
         headers?: Record<string, string>,
@@ -683,5 +1017,276 @@ export class GitHubClientImpl implements GitHubClient {
     }
 
     return lines.join("\n");
+  }
+
+  /**
+   * Create a new issue in the repository.
+   *
+   * @param owner - Repository owner
+   * @param repo - Repository name
+   * @param title - Issue title
+   * @param body - Issue body in markdown
+   * @param labels - Optional labels to apply to the issue
+   * @returns Created issue number and URL
+   * @throws GitHubAccessError for authentication/permission errors
+   * @throws GitHubRateLimitError when rate limited
+   */
+  async createIssue(
+    owner: string,
+    repo: string,
+    title: string,
+    body: string,
+    labels?: string[],
+  ): Promise<{ number: number; url: string }> {
+    return await this.retryHandler.execute(async () => {
+      const url = `${this.baseUrl}/repos/${owner}/${repo}/issues`;
+      const response = await this.githubApi.post(
+        url,
+        {
+          title,
+          body,
+          labels: labels ?? [],
+        },
+        this.getHeaders(),
+      );
+
+      this.handleResponse(response);
+
+      const data = await response.json();
+      return {
+        number: data.number as number,
+        url: data.html_url as string,
+      };
+    });
+  }
+
+  /**
+   * Get an issue by number.
+   *
+   * @param owner - Repository owner
+   * @param repo - Repository name
+   * @param issueNumber - Issue number
+   * @returns Issue details
+   * @throws GitHubAccessError if issue not found or access denied
+   * @throws GitHubRateLimitError when rate limited
+   */
+  async getIssue(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+  ): Promise<GitHubIssue> {
+    return await this.retryHandler.execute(async () => {
+      const url = `${this.baseUrl}/repos/${owner}/${repo}/issues/${issueNumber}`;
+      const response = await this.githubApi.get(url, this.getHeaders());
+
+      if (response.status === 404) {
+        throw new GitHubAccessError(
+          "Issue not found",
+          `Issue #${issueNumber} does not exist in ${owner}/${repo}`,
+          "Verify the issue number and repository",
+        );
+      }
+
+      this.handleResponse(response);
+
+      const data = await response.json();
+      return {
+        number: data.number as number,
+        title: data.title as string,
+        body: (data.body as string | null) ?? null,
+        state: data.state as "open" | "closed",
+        html_url: data.html_url as string,
+        user: {
+          id: data.user.id as number,
+          login: data.user.login as string,
+        },
+        labels: (data.labels as Array<{ name: string }>).map((l) => ({
+          name: l.name,
+        })),
+        created_at: data.created_at as string,
+        updated_at: data.updated_at as string,
+      };
+    });
+  }
+
+  /**
+   * Get all comments on an issue.
+   *
+   * Handles pagination automatically by following Link headers.
+   *
+   * @param owner - Repository owner
+   * @param repo - Repository name
+   * @param issueNumber - Issue number
+   * @returns Array of all comments on the issue
+   * @throws GitHubAccessError for authentication/permission errors or if issue not found
+   * @throws GitHubRateLimitError when rate limited
+   */
+  async getIssueComments(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+  ): Promise<GitHubComment[]> {
+    return await this.retryHandler.execute(async () => {
+      const allComments: GitHubComment[] = [];
+      let url: string | null =
+        `${this.baseUrl}/repos/${owner}/${repo}/issues/${issueNumber}/comments?per_page=100`;
+
+      while (url !== null) {
+        const response = await this.githubApi.get(url, this.getHeaders());
+
+        // Handle 404 specifically for non-existent issues
+        if (response.status === 404) {
+          throw new GitHubAccessError(
+            "Issue not found",
+            `Issue #${issueNumber} does not exist in ${owner}/${repo}`,
+            "Verify the issue number and repository",
+          );
+        }
+
+        this.handleResponse(response);
+
+        const data = await response.json() as Array<{
+          id: number;
+          body: string;
+          created_at: string;
+          updated_at: string;
+          user: { id: number; login: string };
+          html_url: string;
+        }>;
+
+        for (const comment of data) {
+          allComments.push({
+            id: comment.id,
+            body: comment.body,
+            created_at: comment.created_at,
+            updated_at: comment.updated_at,
+            user: {
+              id: comment.user.id,
+              login: comment.user.login,
+            },
+            html_url: comment.html_url,
+          });
+        }
+
+        // Parse Link header for pagination
+        url = this.parseNextPageUrl(response.headers.get("link"));
+      }
+
+      return allComments;
+    });
+  }
+
+  /**
+   * Parse the Link header to extract the URL for the next page.
+   *
+   * @param linkHeader - Value of the Link header from GitHub API response
+   * @returns URL for next page, or null if no next page exists
+   */
+  private parseNextPageUrl(linkHeader: string | null): string | null {
+    if (!linkHeader) {
+      return null;
+    }
+
+    // Link header format: <url>; rel="next", <url>; rel="last"
+    const links = linkHeader.split(",");
+    for (const link of links) {
+      const parts = link.trim().split(";");
+      if (parts.length < 2) {
+        continue;
+      }
+
+      const urlMatch = parts[0].trim().match(/<(.+)>/);
+      const relMatch = parts[1].trim().match(/rel="(.+)"/);
+
+      if (urlMatch && relMatch && relMatch[1] === "next") {
+        return urlMatch[1];
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Create a comment on an issue.
+   *
+   * @param owner - Repository owner
+   * @param repo - Repository name
+   * @param issueNumber - Issue number
+   * @param body - Comment body in markdown
+   * @returns Created comment
+   * @throws GitHubAccessError for authentication/permission errors
+   * @throws GitHubRateLimitError when rate limited
+   */
+  async createIssueComment(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    body: string,
+  ): Promise<GitHubComment> {
+    return await this.retryHandler.execute(async () => {
+      const url = `${this.baseUrl}/repos/${owner}/${repo}/issues/${issueNumber}/comments`;
+      const response = await this.githubApi.post(
+        url,
+        { body },
+        this.getHeaders(),
+      );
+
+      this.handleResponse(response);
+
+      const data = await response.json();
+      return {
+        id: data.id as number,
+        body: data.body as string,
+        created_at: data.created_at as string,
+        updated_at: data.updated_at as string,
+        user: {
+          id: data.user.id as number,
+          login: data.user.login as string,
+        },
+        html_url: data.html_url as string,
+      };
+    });
+  }
+
+  /**
+   * Update an existing issue comment.
+   *
+   * @param owner - Repository owner
+   * @param repo - Repository name
+   * @param commentId - Comment ID to update
+   * @param body - Updated comment body in markdown
+   * @returns Updated comment
+   * @throws GitHubAccessError for authentication/permission errors
+   * @throws GitHubRateLimitError when rate limited
+   */
+  async updateIssueComment(
+    owner: string,
+    repo: string,
+    commentId: number,
+    body: string,
+  ): Promise<GitHubComment> {
+    return await this.retryHandler.execute(async () => {
+      const url = `${this.baseUrl}/repos/${owner}/${repo}/issues/comments/${commentId}`;
+      const response = await this.githubApi.patch(
+        url,
+        { body },
+        this.getHeaders(),
+      );
+
+      this.handleResponse(response);
+
+      const data = await response.json();
+      return {
+        id: data.id as number,
+        body: data.body as string,
+        created_at: data.created_at as string,
+        updated_at: data.updated_at as string,
+        user: {
+          id: data.user.id as number,
+          login: data.user.login as string,
+        },
+        html_url: data.html_url as string,
+      };
+    });
   }
 }

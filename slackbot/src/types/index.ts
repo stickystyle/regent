@@ -11,3 +11,4 @@ export {
 export { type Persona, type SpecDocument, toMarkdown, type UseCase } from "./spec-document.ts";
 export { Framework, type RelevantFile, type RepositoryContext } from "./repository-context.ts";
 export { type SlackSlashCommandInput, type SlashCommand } from "./slash-command.ts";
+export { type GitHubComment, type GitHubIssue, type GitHubUser } from "./github.ts";

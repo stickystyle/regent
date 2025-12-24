@@ -278,6 +278,55 @@ describe("CanvasManager", () => {
         assertEquals(canvas.getUpdatedCanvases().length, 0);
       });
     });
+
+    describe("getCanvasContent", () => {
+      it("should return content for existing canvas", async () => {
+        // Set up canvas content
+        canvas.setCanvasContent("canvas_test_123", "# Test Spec\n\nThis is test content.");
+
+        const content = await canvas.getCanvasContent("canvas_test_123");
+
+        assertEquals(content, "# Test Spec\n\nThis is test content.");
+      });
+
+      it("should throw error for non-existent canvas", async () => {
+        await assertRejects(
+          () => canvas.getCanvasContent("canvas_nonexistent"),
+          SlackCanvasError,
+          "Canvas not found",
+        );
+      });
+
+      it("should throw configured error", async () => {
+        canvas.setCanvasContent("canvas_test_123", "Some content");
+        const error = new SlackCanvasError(
+          "Canvas read failed",
+          "Permission denied",
+          "Check permissions",
+        );
+        canvas.setGetCanvasContentError(error);
+
+        await assertRejects(
+          () => canvas.getCanvasContent("canvas_test_123"),
+          SlackCanvasError,
+          "Canvas read failed",
+        );
+      });
+
+      it("should clear canvas contents and errors on clear()", async () => {
+        canvas.setCanvasContent("canvas_test_123", "Some content");
+        canvas.setGetCanvasContentError(new SlackCanvasError("Test", "Test", "Test"));
+
+        canvas.clear();
+
+        // Should fail because content was cleared
+        await assertRejects(
+          () => canvas.getCanvasContent("canvas_test_123"),
+          SlackCanvasError,
+          "Canvas not found",
+        );
+      });
+    });
   });
 
   describe("CanvasManagerImpl with Slack API integration", () => {
@@ -518,6 +567,99 @@ describe("CanvasManager", () => {
         assertEquals(typeof formatted, "string");
         assertEquals(formatted.includes("# Test Specification"), true);
         assertEquals(formatted.includes("## Overview"), true);
+      });
+    });
+
+    describe("getCanvasContent", () => {
+      it("should return content from Canvas API", async () => {
+        // Add get method to mock
+        const mockCanvasApiWithGet = {
+          ...mockCanvasApi,
+          get: (_params: { canvas_id: string }) =>
+            Promise.resolve({
+              ok: true,
+              content: "# Test Spec\n\nThis is the canvas content.",
+            }),
+        };
+
+        const managerWithGet = new CanvasManagerImpl(
+          mockCanvasApiWithGet,
+          mockMessagingClient,
+        );
+
+        const content = await managerWithGet.getCanvasContent("canvas_1234567890");
+
+        assertEquals(content, "# Test Spec\n\nThis is the canvas content.");
+      });
+
+      it("should pass correct canvas ID to Canvas API", async () => {
+        let capturedParams: { canvas_id: string } | undefined;
+
+        const mockCanvasApiWithGet = {
+          ...mockCanvasApi,
+          get: (params: { canvas_id: string }) => {
+            capturedParams = params;
+            return Promise.resolve({
+              ok: true,
+              content: "Content",
+            });
+          },
+        };
+
+        const managerWithGet = new CanvasManagerImpl(
+          mockCanvasApiWithGet,
+          mockMessagingClient,
+        );
+
+        await managerWithGet.getCanvasContent("canvas_test_id");
+
+        assertEquals(capturedParams!.canvas_id, "canvas_test_id");
+      });
+
+      it("should throw SlackCanvasError when API returns ok: false", async () => {
+        const mockCanvasApiWithGet = {
+          ...mockCanvasApi,
+          get: (_params: { canvas_id: string }) =>
+            Promise.resolve({
+              ok: false,
+              content: "",
+            }),
+        };
+
+        const managerWithGet = new CanvasManagerImpl(
+          mockCanvasApiWithGet,
+          mockMessagingClient,
+        );
+
+        await assertRejects(
+          () => managerWithGet.getCanvasContent("canvas_1234567890"),
+          SlackCanvasError,
+          "Canvas read failed",
+        );
+      });
+
+      it("should propagate Canvas API errors", async () => {
+        const mockCanvasApiWithGet = {
+          ...mockCanvasApi,
+          get: (_params: { canvas_id: string }) => {
+            throw new SlackCanvasError(
+              "Canvas not found",
+              "Canvas does not exist",
+              "Check canvas ID",
+            );
+          },
+        };
+
+        const managerWithGet = new CanvasManagerImpl(
+          mockCanvasApiWithGet,
+          mockMessagingClient,
+        );
+
+        await assertRejects(
+          () => managerWithGet.getCanvasContent("canvas_nonexistent"),
+          SlackCanvasError,
+          "Canvas not found",
+        );
       });
     });
   });

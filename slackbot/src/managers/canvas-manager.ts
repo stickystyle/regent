@@ -45,6 +45,27 @@ export interface CanvasManager {
   updateCanvas(canvasId: string, spec: SpecDocument): Promise<void>;
 
   /**
+   * Update existing Canvas with raw markdown content.
+   *
+   * Use this when you have raw content rather than a SpecDocument,
+   * such as when adding metadata like Epic URLs to existing content.
+   *
+   * @param canvasId - The Canvas ID to update
+   * @param content - Raw markdown content
+   * @throws SlackCanvasError if Canvas update fails
+   */
+  updateCanvasContent(canvasId: string, content: string): Promise<void>;
+
+  /**
+   * Get content from an existing Canvas.
+   *
+   * @param canvasId - The Canvas ID to read
+   * @returns Markdown content from the Canvas
+   * @throws SlackCanvasError if Canvas cannot be read
+   */
+  getCanvasContent(canvasId: string): Promise<string>;
+
+  /**
    * Convert spec markdown to Canvas-compatible format.
    *
    * Uses toMarkdown() from spec-document.ts to format the spec in
@@ -81,6 +102,9 @@ export class CanvasManagerImpl implements CanvasManager {
         canvas_id: string;
         content: string;
       }) => Promise<{ ok: boolean }>;
+      get?: (params: {
+        canvas_id: string;
+      }) => Promise<{ ok: boolean; content: string }>;
     },
     private readonly messagingClient: SlackMessagingClient,
   ) {}
@@ -137,10 +161,13 @@ export class CanvasManagerImpl implements CanvasManager {
 
   async updateCanvas(canvasId: string, spec: SpecDocument): Promise<void> {
     const markdown = this.formatForCanvas(spec);
+    await this.updateCanvasContent(canvasId, markdown);
+  }
 
+  async updateCanvasContent(canvasId: string, content: string): Promise<void> {
     const result = await this.canvasApi.edit({
       canvas_id: canvasId,
-      content: markdown,
+      content: content,
     });
 
     // Check if Canvas API returned ok: false
@@ -151,6 +178,31 @@ export class CanvasManagerImpl implements CanvasManager {
         "Check Canvas permissions and try again",
       );
     }
+  }
+
+  async getCanvasContent(canvasId: string): Promise<string> {
+    if (!this.canvasApi.get) {
+      throw new SlackCanvasError(
+        "Canvas read failed",
+        "Canvas get API not available",
+        "Ensure Canvas API supports get operations",
+      );
+    }
+
+    const result = await this.canvasApi.get({
+      canvas_id: canvasId,
+    });
+
+    // Check if Canvas API returned ok: false
+    if (!result.ok) {
+      throw new SlackCanvasError(
+        "Canvas read failed",
+        "Slack API returned ok: false",
+        "Check Canvas permissions and try again",
+      );
+    }
+
+    return result.content;
   }
 
   formatForCanvas(spec: SpecDocument): string {
@@ -167,6 +219,7 @@ export class CanvasManagerImpl implements CanvasManager {
 export class MockCanvasManager implements CanvasManager {
   private createCanvasError: Error | null = null;
   private updateCanvasError: Error | null = null;
+  private getCanvasContentError: Error | null = null;
   private canvasCounter = 0;
   private createdCanvases: Array<{
     canvasId: string;
@@ -178,6 +231,7 @@ export class MockCanvasManager implements CanvasManager {
     canvasId: string;
     content: string;
   }> = [];
+  private canvasContents: Map<string, string> = new Map();
 
   /**
    * Configure an error to be thrown by createCanvas.
@@ -195,6 +249,25 @@ export class MockCanvasManager implements CanvasManager {
    */
   setUpdateCanvasError(error: Error): void {
     this.updateCanvasError = error;
+  }
+
+  /**
+   * Configure an error to be thrown by getCanvasContent.
+   *
+   * @param error - Error to throw on next getCanvasContent call
+   */
+  setGetCanvasContentError(error: Error): void {
+    this.getCanvasContentError = error;
+  }
+
+  /**
+   * Set mock content for a Canvas ID (for testing getCanvasContent).
+   *
+   * @param canvasId - Canvas ID to set content for
+   * @param content - Content to return when getCanvasContent is called
+   */
+  setCanvasContent(canvasId: string, content: string): void {
+    this.canvasContents.set(canvasId, content);
   }
 
   /**
@@ -225,9 +298,11 @@ export class MockCanvasManager implements CanvasManager {
   clear(): void {
     this.createCanvasError = null;
     this.updateCanvasError = null;
+    this.getCanvasContentError = null;
     this.canvasCounter = 0;
     this.createdCanvases = [];
     this.updatedCanvases = [];
+    this.canvasContents.clear();
   }
 
   createCanvas(
@@ -257,19 +332,47 @@ export class MockCanvasManager implements CanvasManager {
   }
 
   updateCanvas(canvasId: string, spec: SpecDocument): Promise<void> {
+    const content = this.formatForCanvas(spec);
+    return this.updateCanvasContent(canvasId, content);
+  }
+
+  updateCanvasContent(canvasId: string, content: string): Promise<void> {
     // Throw configured error if set
     if (this.updateCanvasError !== null) {
       return Promise.reject(this.updateCanvasError);
     }
 
     // Record the update
-    const content = this.formatForCanvas(spec);
     this.updatedCanvases.push({
       canvasId,
       content,
     });
 
+    // Also update the stored content for subsequent getCanvasContent calls
+    this.canvasContents.set(canvasId, content);
+
     return Promise.resolve();
+  }
+
+  getCanvasContent(canvasId: string): Promise<string> {
+    // Throw configured error if set
+    if (this.getCanvasContentError !== null) {
+      return Promise.reject(this.getCanvasContentError);
+    }
+
+    // Return configured content or throw not found error
+    const content = this.canvasContents.get(canvasId);
+    if (content === undefined) {
+      return Promise.reject(
+        new SlackCanvasError(
+          "Canvas not found",
+          `No content configured for canvas ${canvasId}`,
+          "Check canvas ID or configure mock content",
+        ),
+      );
+    }
+
+    return Promise.resolve(content);
   }
 
   formatForCanvas(spec: SpecDocument): string {
