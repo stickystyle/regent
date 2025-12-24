@@ -37,64 +37,31 @@ Implement a task from a GitHub issue, working on a shared feature branch with a 
 
 If the local spec directory does not exist, attempt to download specs from the parent Epic.
 
-1. **Get repository info:**
-   ```bash
-   OWNER=$(gh repo view --json owner --jq '.owner.login')
-   REPO=$(gh repo view --json name --jq '.name')
-   ```
-
-2. **Get spec name from task issue labels:**
+1. **Get spec name from task issue labels:**
    ```bash
    SPEC_NAME=$(gh issue view {N} --json labels \
      --jq '.labels[] | select(.name | startswith("spec:")) | .name | sub("spec:"; "")')
    ```
 
-3. **Find parent Epic with same spec label:**
+2. **Find parent Epic with same spec label:**
    ```bash
    EPIC=$(gh issue list --label "regent:epic" --label "spec:${SPEC_NAME}" \
      --json number --jq '.[0].number')
    ```
 
-4. **If Epic found, download all spec documents:**
+3. **If Epic found, use the fetch script:**
+   ```bash
+   eval "$(plugin/scripts/fetch-epic-specs.sh ${EPIC})"
+   ```
 
-   a. Create local spec directory:
-      ```bash
-      mkdir -p .regent/${SPEC_NAME}
-      ```
+   This downloads all specs (brainstorm, requirements, design) in minimal API calls.
 
-   b. Download brainstorm:
-      ```bash
-      CONTENT=$(gh api repos/${OWNER}/${REPO}/issues/${EPIC}/comments \
-        --jq '.[] | select(.body | contains("<!-- REGENT_SPEC:brainstorm -->")) | .body')
-      ```
-      - Extract content from inside the `<details>` section (between `</summary>` and `</details>`)
-      - Write to `.regent/${SPEC_NAME}/brainstorm.md`
+   Report to user:
+   ```
+   Downloaded specs from Epic #${EPIC} to .regent/${SPEC_NAME}/
+   ```
 
-   c. Download requirements:
-      ```bash
-      CONTENT=$(gh api repos/${OWNER}/${REPO}/issues/${EPIC}/comments \
-        --jq '.[] | select(.body | contains("<!-- REGENT_SPEC:requirements -->")) | .body')
-      ```
-      - Extract content from inside the `<details>` section
-      - Write to `.regent/${SPEC_NAME}/requirements.md`
-
-   d. Download design:
-      ```bash
-      CONTENT=$(gh api repos/${OWNER}/${REPO}/issues/${EPIC}/comments \
-        --jq '.[] | select(.body | contains("<!-- REGENT_SPEC:design -->")) | .body')
-      ```
-      - Extract content from inside the `<details>` section
-      - Write to `.regent/${SPEC_NAME}/design.md`
-
-   e. Report to user:
-      ```
-      Downloaded specs from Epic #{EPIC} to .regent/${SPEC_NAME}/
-      - brainstorm.md
-      - requirements.md
-      - design.md
-      ```
-
-5. **If no Epic found:**
+4. **If no Epic found:**
    - Warn user: "Could not find parent Epic for spec '${SPEC_NAME}'. Specs are not available locally."
    - Ask user if they want to proceed anyway (the task may still be implementable from issue context alone)
 

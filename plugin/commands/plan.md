@@ -21,58 +21,37 @@ Generate a TDD-ordered implementation task list from the design document.
   - Task issues are created as children of the Epic (instead of creating a new Epic)
   - No tasks.md file is created locally (child issues ARE the tasks)
 
-## Phase 0: Epic Validation (when --epic N provided)
+## Phase 0: Fetch Epic Data (when --epic N provided)
 
-If the `--epic N` argument is provided:
+If the `--epic N` argument is provided, run the optimized fetch script that performs all validation, spec download, and child issue detection in minimal API calls:
 
-1. Parse the `--epic N` argument to extract the issue number
-2. Get repository owner/repo from current git remote:
-   ```bash
-   gh repo view --json owner,name --jq '"\(.owner.login)/\(.name)"'
-   ```
-3. Validate the Epic issue exists and has the `regent:epic` label:
-   ```bash
-   gh issue view {N} --json labels --jq '.labels[].name' | grep -q "regent:epic"
-   ```
-   If not, report error: "Issue #{N} is not a Regent Epic (missing regent:epic label)"
+```bash
+eval "$(plugin/scripts/fetch-epic-specs.sh {N})"
+```
 
-4. Extract spec name from Epic title:
-   - Get title: `gh issue view {N} --json title --jq '.title'`
-   - Remove "[Epic] " prefix
-   - Convert to kebab-case for directory name
+This script:
+1. Validates the Epic exists and has the `regent:epic` label
+2. Extracts the spec name from the Epic title
+3. Downloads all spec comments (brainstorm, requirements, design) in ONE API call
+4. Writes specs to `.regent/{spec-name}/` directory
+5. Fetches child issues in ONE API call (filtering out the Epic itself)
 
-## Phase 0.5: Download Specs from Epic (when --epic N provided)
+**Variables set by the script:**
+- `SPEC_NAME` - kebab-case name derived from Epic title
+- `EPIC_NUM` - the Epic issue number
+- `OWNER` / `REPO` - repository owner and name
+- `SPECS_DIR` - path to local spec directory (`.regent/{spec-name}`)
+- `CHILD_ISSUES_FILE` - path to JSON file containing child issues
+- `CHILD_COUNT` - number of existing child issues (excluding Epic)
 
-1. Create local spec directory:
-   ```bash
-   mkdir -p .regent/{spec-name}
-   ```
+**Error handling:** The script exits with an error message if:
+- Epic issue not found
+- Epic missing `regent:epic` label
+- Requirements or design spec not found on Epic
 
-2. Fetch and cache brainstorm:
-   ```bash
-   gh api repos/{owner}/{repo}/issues/{N}/comments \
-     --jq '.[] | select(.body | contains("<!-- REGENT_SPEC:brainstorm -->")) | .body'
-   ```
-   - Extract content from inside the `<details>` section (between `</summary>` and `</details>`)
-   - Write to `.regent/{spec-name}/brainstorm.md`
-
-3. Fetch and cache requirements:
-   ```bash
-   gh api repos/{owner}/{repo}/issues/{N}/comments \
-     --jq '.[] | select(.body | contains("<!-- REGENT_SPEC:requirements -->")) | .body'
-   ```
-   - Extract content from inside the `<details>` section
-   - Write to `.regent/{spec-name}/requirements.md`
-   - If requirements not found, report error: "Requirements spec not found on Epic #{N}. Run /regent:specify --epic {N} first."
-
-4. Fetch and cache design:
-   ```bash
-   gh api repos/{owner}/{repo}/issues/{N}/comments \
-     --jq '.[] | select(.body | contains("<!-- REGENT_SPEC:design -->")) | .body'
-   ```
-   - Extract content from inside the `<details>` section
-   - Write to `.regent/{spec-name}/design.md`
-   - If design not found, report error: "Design spec not found on Epic #{N}. Run /regent:design --epic {N} first."
+**Reconciliation mode:**
+- If `CHILD_COUNT > 0`: Set flag for reconciliation mode (will run Phases 4.5-5.5)
+- If `CHILD_COUNT = 0`: Continue normal flow (skip reconciliation phases)
 
 ## Prerequisites (when --epic N not provided)
 
@@ -127,6 +106,134 @@ If the user requests changes, either:
 - Make minor adjustments directly, OR
 - Re-invoke `regent-tasks-writer` with updated guidance
 
+### Phase 4.5: Reconciliation Analysis (when existing child issues found)
+
+**Only execute if `CHILD_COUNT > 0` was set in Phase 0.**
+
+Load existing child issues from `$CHILD_ISSUES_FILE` (JSON array with number, title, state, body, labels).
+
+Compare existing child issues against the new task list from regent-tasks-writer.
+
+#### Categorization Rules
+
+For each existing issue and new task, determine:
+
+1. **KEEP_COMPLETED**: Existing issue is CLOSED and semantically matches a new task
+   - The issue stays closed, represents completed work
+   - Mark the matching new task as "covered"
+
+2. **KEEP_OPEN**: Existing issue is OPEN and semantically matches a new task
+   - Keep the open issue, work can continue
+   - Mark the matching new task as "covered"
+
+3. **CLOSE_OBSOLETE**: Existing issue (open or closed) has NO semantic match in new task list
+   - Will be closed with explanation comment
+
+4. **CREATE_NEW**: New task has NO semantic match in existing issues
+   - Will create a new issue
+
+5. **UNCERTAIN**: Borderline semantic match where you're not confident
+   - Example: "Implement GitHub client" vs "Implement GitHub issue API client"
+   - Will ask user to decide
+
+#### Semantic Matching Guidelines
+
+When comparing titles:
+- Ignore "Task N:" prefixes
+- Consider synonyms ("implement" = "create" = "add" = "build")
+- Consider partial matches ("GitHub client" is related to "GitHub issue API client")
+- Consider word order doesn't matter ("user authentication" = "authentication for users")
+- Be conservative - when in doubt, categorize as UNCERTAIN
+
+**Note:** The UPDATE category is derived during Phase 4.7 when users choose "Update description" for UNCERTAIN matches. It is not assigned during initial categorization.
+
+### Phase 4.6: Present Reconciliation Summary
+
+Present the analysis using this format:
+
+```
+═══════════════════════════════════════════════════════════════
+                    PLAN RECONCILIATION
+═══════════════════════════════════════════════════════════════
+
+✓ KEEP (completed, still relevant):
+  • #{number} {title}
+
+→ KEEP (open, still relevant):
+  • #{number} {title}
+    └─ Matches: "{new task title}"
+
+✗ CLOSE AS OBSOLETE:
+  • #{number} {title}
+    └─ Reason: No matching task in updated plan
+
++ CREATE NEW:
+  • {new task title}
+
+? NEED YOUR INPUT:
+  • #{number} "{existing title}"
+    └─ Possibly matches: "{new task title}"
+
+═══════════════════════════════════════════════════════════════
+```
+
+### Phase 4.7: Resolve Uncertain Matches
+
+For each issue in the UNCERTAIN category, use the AskUserQuestion tool:
+
+**Question**: "How should we handle issue #{number} '{existing title}'?"
+**Header**: "Issue #{N}"
+**multiSelect**: false
+**Options**:
+1. label: "Keep as-is", description: "This issue matches the new task '{new task}', keep it unchanged"
+2. label: "Update description", description: "Same issue, but update the body to reflect new task requirements"
+3. label: "Close and recreate", description: "Close this issue and create a fresh one for '{new task}'"
+
+Based on user response:
+- "Keep as-is" → Move to KEEP_OPEN category
+- "Update description" → Add to UPDATE category (new category for modified issues)
+- "Close and recreate" → Add to CLOSE_OBSOLETE and CREATE_NEW categories
+
+Repeat for each uncertain match before proceeding.
+
+### Phase 4.8: Final Confirmation
+
+Present the complete action summary:
+
+```
+═══════════════════════════════════════════════════════════════
+                    RECONCILIATION PLAN
+═══════════════════════════════════════════════════════════════
+
+Actions to take:
+
+  CLOSE ({count} issues):
+    • #{number} - {title}
+
+  UPDATE ({count} issues):
+    • #{number} - will update description
+
+  CREATE ({count} new issues):
+    • {new task title}
+
+  NO CHANGE ({count} issues):
+    • #{number} - {title}
+
+═══════════════════════════════════════════════════════════════
+```
+
+Use AskUserQuestion tool:
+
+**Question**: "Proceed with this reconciliation plan?"
+**Header**: "Confirm"
+**multiSelect**: false
+**Options**:
+1. label: "Yes, execute", description: "Apply all changes: close obsolete issues, create new ones, update descriptions"
+2. label: "No, abort", description: "Cancel reconciliation, no changes will be made"
+
+If "No, abort": Stop execution and inform user: "Reconciliation aborted. No changes were made."
+If "Yes, execute": Continue to Phase 5.5.
+
 ### Phase 5: Finalization
 
 On approval:
@@ -138,7 +245,75 @@ On approval:
 **If `--epic N` was provided:**
 1. Do NOT write tasks.md locally (child issues ARE the tasks)
 2. Skip Phase 6 (Epic already exists)
-3. Proceed to Phase 6.5: Create Task Issues
+3. If reconciliation was performed: Proceed to Phase 5.5
+4. Otherwise: Proceed to Phase 6.5: Create Task Issues
+
+### Phase 5.5: Execute Reconciliation (when confirmed)
+
+**Only execute if user confirmed in Phase 4.8.**
+
+#### Error Handling
+
+If any `gh` command fails during reconciliation:
+1. Stop execution immediately
+2. Report which operations completed and which failed
+3. Provide a list of remaining operations so the user can retry manually or re-run reconciliation
+
+**Note:** Placeholder values like `{number}`, `{epic_number}`, and `{updated task description}` should be substituted with actual values before command execution.
+
+#### Close Obsolete Issues
+
+For each issue in CLOSE_OBSOLETE category:
+
+```bash
+gh issue close {number} --comment "$(cat <<'EOF'
+This task has been marked obsolete during a re-planning session.
+
+**Reason:** No matching task in the updated plan.
+
+See parent Epic #{epic_number} for the updated plan.
+
+---
+*Closed by [Regent](https://github.com/stickystyle/regent) during pivot reconciliation*
+EOF
+)"
+```
+
+#### Update Issue Descriptions
+
+For each issue in UPDATE category:
+
+```bash
+gh issue edit {number} --body "$(cat <<'EOF'
+Parent Epic: #{epic_number}
+
+## Task Description
+
+{updated task description from the new task list}
+
+## Acceptance Criteria
+
+{criteria derived from design.md or requirements.md}
+
+---
+*Updated by [Regent](https://github.com/stickystyle/regent) during pivot reconciliation*
+EOF
+)"
+```
+
+#### Summary
+
+After execution, report:
+
+```
+Reconciliation complete:
+  - Closed: {count} obsolete issues
+  - Updated: {count} issue descriptions
+  - Preserved: {count} existing issues
+  - Will create: {count} new issues (in Phase 6.5)
+```
+
+Proceed to Phase 6.5 for creating new issues.
 
 ### Phase 6: Create Epic Issue (when --epic N NOT provided)
 
@@ -219,6 +394,14 @@ After saving tasks.md, create a GitHub epic issue to serve as the master trackin
 
 **Only execute this phase if `--epic N` was provided.**
 
+**If reconciliation was performed (Phases 4.5-5.5):**
+- Only create issues for tasks in the CREATE_NEW category
+- Skip tasks that were matched to existing issues (KEEP_OPEN, KEEP_COMPLETED, UPDATE)
+- The existing issues already track those tasks
+
+**If no reconciliation (first-time planning with no existing child issues):**
+- Create all task issues as normal (existing behavior)
+
 Create GitHub issues for each task, linked to the existing Epic.
 
 1. **Ensure labels exist:**
@@ -251,24 +434,86 @@ Create GitHub issues for each task, linked to the existing Epic.
    ```
 
 3. **Track created issues:**
-   - Note the issue numbers as they are created
+   - Collect all newly created issue numbers and their IDs
    - Child issues ARE the tasks (no tasks.md file needed)
+   - These will be needed for Phase 7
 
-4. **Confirm to user:**
-   ```
-   Task issues created under Epic #{N}
+4. **Proceed to Phase 7** to add and order sub-issues.
 
-   Summary:
-   - X task issues created
-   - Epic: #{N}
+### Phase 7: Order Sub-Issues (when --epic N provided)
 
-   Created issues:
-   - #{issue-1}: Task 1: {title}
-   - #{issue-2}: Task 2: {title}
-   ...
+**Only execute this phase if `--epic N` was provided.**
 
-   Next step: Run /regent:execute-issue {issue-number} to implement a task.
-   ```
+After creating task issues (Phase 6.5) or completing reconciliation (Phase 5.5), ensure all task issues are properly linked as sub-issues and ordered correctly.
+
+#### Step 1: Add New Issues as Sub-Issues
+
+For each newly created issue, add it as a sub-issue of the Epic:
+
+```bash
+# Get the issue ID (not the issue number)
+ISSUE_ID=$(gh api repos/{owner}/{repo}/issues/{issue_number} --jq '.id')
+
+# Add as sub-issue
+gh api repos/{owner}/{repo}/issues/{epic_number}/sub_issues \
+  --method POST \
+  -F sub_issue_id=$ISSUE_ID
+```
+
+#### Step 2: Determine Correct Order
+
+Build the correct TDD implementation order by combining:
+1. Existing completed issues (in their logical order)
+2. Existing open issues (in their logical order)
+3. Newly created issues (inserted at their correct positions)
+
+The order should match the task list generated by `regent-tasks-writer`.
+
+#### Step 3: Reorder Sub-Issues
+
+Use the GitHub Sub-Issues Priority API to reorder issues:
+
+```bash
+# Get issue IDs
+ISSUE_A_ID=$(gh api repos/{owner}/{repo}/issues/{issue_a} --jq '.id')
+ISSUE_B_ID=$(gh api repos/{owner}/{repo}/issues/{issue_b} --jq '.id')
+
+# Move issue B after issue A
+gh api repos/{owner}/{repo}/issues/{epic_number}/sub_issues/priority \
+  --method PATCH \
+  -F sub_issue_id=$ISSUE_B_ID \
+  -F after_id=$ISSUE_A_ID
+```
+
+Iterate through the correct order, moving each issue after the previous one.
+
+#### Step 4: Verify Order
+
+After reordering, verify the order is correct:
+
+```bash
+gh api repos/{owner}/{repo}/issues/{epic_number}/sub_issues \
+  --jq '.[] | "\(.number) | \(.state) | \(.title)"'
+```
+
+#### Step 5: Confirm to User
+
+```
+Task issues created and ordered under Epic #{N}
+
+Summary:
+- {X} task issues created
+- {Y} existing issues preserved
+- All {Z} sub-issues ordered by TDD implementation sequence
+
+Sub-issue order:
+  1. #{issue-1}: {title} (completed)
+  2. #{issue-2}: {title} (completed)
+  ...
+  N. #{issue-N}: {title} (open) ← NEXT
+
+Next step: Run /regent:execute-issue {next-open-issue} to implement the next task.
+```
 
 ## Important Notes
 

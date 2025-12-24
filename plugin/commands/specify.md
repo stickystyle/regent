@@ -18,46 +18,17 @@ Transform the brainstorm document into structured requirements using the EARS (E
 
 - `--epic N` (optional): The GitHub issue number of the Epic containing the brainstorm spec. When provided, brainstorm is downloaded from the Epic and requirements are uploaded back to the Epic.
 
-## Phase 0: Epic Validation (when --epic N provided)
+## Phase 0: Fetch Epic Data (when --epic N provided)
 
-If the `--epic N` argument is provided:
+If the `--epic N` argument is provided, run the optimized fetch script:
 
-1. Parse the `--epic N` argument to extract the issue number
-2. Get repository owner/repo from current git remote:
-   ```bash
-   gh repo view --json owner,name --jq '"\(.owner.login)/\(.name)"'
-   ```
-3. Validate the Epic issue exists and has the `regent:epic` label:
-   ```bash
-   gh issue view {N} --json labels --jq '.labels[].name' | grep -q "regent:epic"
-   ```
-   If not, report error: "Issue #{N} is not a Regent Epic (missing regent:epic label)"
+```bash
+eval "$(plugin/scripts/fetch-epic-specs.sh {N})"
+```
 
-4. Extract spec name from Epic title:
-   - Get title: `gh issue view {N} --json title --jq '.title'`
-   - Remove "[Epic] " prefix
-   - Convert to kebab-case for directory name
+This script validates the Epic, downloads all spec comments in minimal API calls, and writes them to `.regent/{spec-name}/`. Variables set: `SPEC_NAME`, `EPIC_NUM`, `OWNER`, `REPO`, `SPECS_DIR`.
 
-## Phase 0.5: Download Brainstorm from Epic (when --epic N provided)
-
-1. Fetch comments from the Epic and find the brainstorm spec:
-   ```bash
-   gh api repos/{owner}/{repo}/issues/{N}/comments \
-     --jq '.[] | select(.body | contains("<!-- REGENT_SPEC:brainstorm -->")) | .body'
-   ```
-
-2. Extract content from inside the `<details>` section:
-   - Find content between `</summary>` and `</details>`
-   - This is the brainstorm.md content
-
-3. Create local spec directory:
-   ```bash
-   mkdir -p .regent/{spec-name}
-   ```
-
-4. Cache brainstorm locally:
-   - Write extracted content to `.regent/{spec-name}/brainstorm.md`
-   - This allows the existing flow to read from local file
+**Note:** The script downloads all specs (brainstorm, requirements, design) even though only brainstorm is needed. This is efficient because all comments are fetched in a single API call, and having cached specs is useful for context.
 
 ## Prerequisites (when --epic N not provided)
 
