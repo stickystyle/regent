@@ -1,8 +1,9 @@
+
 # Requirements Document
 
 ## Introduction
 
-Regent Slack Bot is a Slack-native collaborative brainstorming tool that enables teams to develop structured specifications with Claude's guidance directly in Slack. The bot conducts guided Q&A sessions in threads, synthesizes team responses into formal spec documents delivered via Slack Canvas, and optionally creates GitHub PRs with finalized specs when connected to a repository.
+Regent Slack Bot is a Slack-native collaborative brainstorming tool that enables teams to develop structured specifications with Claude's guidance directly in Slack. The bot conducts guided Q&A sessions in threads, synthesizes team responses into formal spec documents delivered via Slack Canvas, and optionally creates GitHub Epic issues with finalized specs stored as collapsible comments when connected to a repository.
 
 ## Glossary
 
@@ -82,17 +83,18 @@ Regent Slack Bot is a Slack-native collaborative brainstorming tool that enables
 4. IF Canvas creation fails THEN the system SHALL fall back to uploading `brainstorm.md` as a file attachment to the thread.
 5. WHEN the Canvas is created THEN it SHALL follow the Regent spec format including: title, overview, problem statement, goals/non-goals, personas, use cases, and any technical details captured.
 
-### Requirement 6: Session Finalization and PR Creation
+### Requirement 6: Session Finalization and Epic Creation
 
-**User Story:** As a senior developer, I want the finalized spec automatically committed to our repository, so that I can immediately use it with the local Regent workflow.
+**User Story:** As a senior developer, I want the finalized spec stored on a GitHub Epic issue, so that I can immediately use it with the local Regent workflow via `/regent:specify --epic N`.
 
 #### Acceptance Criteria
 
 1. WHEN a user posts `@regent approved` during review phase THEN the system SHALL transition the session to finalized phase.
-2. GIVEN a session has a repository configured WHEN the session is finalized THEN the system SHALL create a pull request containing `.regent/{spec-name}/brainstorm.md`.
-3. WHEN creating a PR THEN the system SHALL read the target branch from `.regent/config.yml` in the repository if it exists, otherwise use the repository's default branch.
-4. WHEN creating a PR THEN the system SHALL include in the description: a link to the original Slack thread, list of participants, and summary of key decisions.
+2. GIVEN a session has a repository configured WHEN the session is finalized THEN the system SHALL create a GitHub Epic issue with `regent:epic` label and store the brainstorm.md as a collapsible comment using `<!-- REGENT_SPEC:brainstorm -->` marker.
+3. WHEN creating an Epic THEN the system SHALL include in the body: a summary of the spec, and links to continue the workflow.
+4. WHEN storing a spec comment THEN the system SHALL format it with a collapsible `<details>` wrapper for readability.
 5. GIVEN a session has no repository configured WHEN the session is finalized THEN the system SHALL mark the session complete and inform the user the Canvas/file is available for manual use.
+6. WHEN the Epic is created THEN the system SHALL post the Epic URL to Slack so users can continue with `/regent:specify --epic N`.
 
 ### Requirement 7: Session Persistence and Resumption
 
