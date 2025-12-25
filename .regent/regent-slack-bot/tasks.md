@@ -74,7 +74,7 @@
   - Write property test: **Property 6 - Canvas Fallback Guarantee**
   - _Requirements: 5.1, 5.3, 5.4_
 
-- [ ] 9. Implement attachment processing
+- [x] 9. Implement attachment processing (#17)
   - Write tests for image download and vision API preparation (PNG, JPG, GIF, WebP)
   - Write tests for text file extraction (Markdown, code files, plain text)
   - Write tests for PDF text extraction
