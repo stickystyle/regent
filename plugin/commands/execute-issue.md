@@ -383,54 +383,7 @@ Once verified:
    The changes will be included in the spec's pull request."
    ```
 
-## Phase 9: Pull Request Management (First Task Only)
-
-Check if a PR already exists for the feature branch:
-
-```bash
-gh pr list --head "feature/{spec-name}" --state open --json number --jq '.[0].number'
-```
-
-**If a PR already exists**: Skip to Phase 10. No PR management needed.
-
-**If no PR exists** (this is the first task for this spec):
-
-1. Get epic issue number from `tasks.md` header (line starting with `Epic: #`)
-
-2. Get repo URL:
-   ```bash
-   gh repo view --json url --jq '.url'
-   ```
-
-3. Create a draft PR:
-   ```bash
-   gh pr create \
-     --title "{Spec Title}" \
-     --body "$(cat <<'EOF'
-   ## Overview
-
-   {Brief description from the spec's brainstorm.md or requirements.md}
-
-   ## Progress
-
-   Track implementation progress via the epic issue: #{epic-number}
-
-   ## Spec Documents
-
-   - [Requirements]({repo-url}/blob/feature/{spec-name}/.regent/{spec-name}/requirements.md)
-   - [Design]({repo-url}/blob/feature/{spec-name}/.regent/{spec-name}/design.md)
-   - [Tasks]({repo-url}/blob/feature/{spec-name}/.regent/{spec-name}/tasks.md)
-
-   ---
-   *Managed by [Regent](https://github.com/stickystyle/regent)*
-   EOF
-   )" \
-     --draft
-   ```
-
-4. Report the new PR URL to the user
-
-## Phase 10: Report Completion
+## Phase 9: Report Completion
 
 Report to user:
 ```
@@ -438,17 +391,6 @@ Task {N} complete: {title}
 
 Branch: feature/{spec-name}
 Issue: #{issue-number} (closed)
-```
-
-If this was the first task (PR was just created), include:
-```
-PR: {pr-url} (draft)
-```
-
-If all tasks in `tasks.md` are now complete (all `- [x]`), add:
-```
-All tasks complete! The PR is ready to be marked as "Ready for Review".
-Run: gh pr ready
 ```
 
 ## Principles
