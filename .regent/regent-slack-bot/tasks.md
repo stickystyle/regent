@@ -102,7 +102,7 @@
   - Implement repository exploration methods in GitHubClient
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 12. Implement Epic Manager
+- [x] 12. Implement Epic Manager (#45)
   - Write tests for createEpic (title, summary, regent:epic label)
   - Write tests for addSpecComment (collapsible format, marker comment)
   - Write tests for updateSpecComment (find by marker, update content)
