@@ -23,7 +23,7 @@ Implement a task from a GitHub issue, working on a shared feature branch with a 
 
 1. Get issue details:
    ```bash
-   gh issue view {N} --json number,title,body,labels
+   gh issue view {N} --json number,title,body,labels,comments
    ```
 
 2. Parse the spec name from labels (find label matching `spec:*`)
@@ -176,6 +176,15 @@ Combine the issue content with codebase exploration into a full task brief.
    ## From Issue #{N}
 
    {issue body content}
+
+   ## Issue Discussion
+
+   {If comments exist, include them chronologically:}
+
+   **@{author}** ({relative time}):
+   > {comment body}
+
+   {If no comments, omit this section entirely}
 
    ## Codebase Context
 
