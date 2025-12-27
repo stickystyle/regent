@@ -114,7 +114,7 @@
 
 ## Anthropic Integration
 
-- [ ] 13. Implement Anthropic client and tool loop
+- [x] 13. Implement Anthropic client and tool loop (#30)
   - Write tests for Messages API request formatting (system prompt, messages, tools)
   - Write tests for tool use parsing and execution
   - Write tests for tool loop iteration (single tool, multiple tools, max iterations)
