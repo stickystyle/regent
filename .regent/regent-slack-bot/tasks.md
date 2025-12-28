@@ -143,7 +143,7 @@
   - Implement initialization flow in SessionOrchestrator
   - _Requirements: 1.1, 1.2, 2.1, 2.4_
 
-- [ ] 16. Implement question-answer loop
+- [x] 16. Implement question-answer loop (#19)
   - Write tests for handleMessage (@regent mention handling)
   - Write tests for answer recording and history updates
   - Write tests for attachment integration with answers

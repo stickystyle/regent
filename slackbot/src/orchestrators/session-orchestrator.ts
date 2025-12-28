@@ -1,14 +1,22 @@
 // ABOUTME: SessionOrchestrator coordinates the /brainstorm command initialization flow.
-// ABOUTME: Handles session creation, repository exploration, and first question generation.
+// ABOUTME: Handles session creation, repository exploration, first question generation, and Q&A loop.
 
 import type { AnthropicClient } from "../clients/anthropic-client.ts";
 import type { GitHubClient } from "../clients/github-client.ts";
 import type { SlackMessagingClient } from "../clients/messaging-client.ts";
 import { BaseError, GitHubAccessError, ValidationError } from "../errors/types.ts";
+import type { MessageCache } from "../managers/message-cache.ts";
 import type { SessionManager } from "../managers/session-manager.ts";
 import type { Message } from "../types/message.ts";
 import type { RepositoryContext } from "../types/repository-context.ts";
+import { Phase } from "../types/session.ts";
+import type { Session } from "../types/session.ts";
 import type { SlashCommand } from "../types/slash-command.ts";
+
+/**
+ * Confidence threshold for transitioning from questioning to review phase.
+ */
+const REVIEW_PHASE_THRESHOLD = 95;
 
 /**
  * SessionOrchestrator coordinates the initialization flow for /brainstorm command.
@@ -18,6 +26,7 @@ import type { SlashCommand } from "../types/slash-command.ts";
  * - Create session record with correct metadata
  * - Explore repository when --repo flag is provided
  * - Generate and post first question from Claude
+ * - Execute tool loop for question-answer flow
  * - Handle errors gracefully with fallback to continue without context
  */
 export class SessionOrchestrator {
@@ -25,6 +34,8 @@ export class SessionOrchestrator {
   private readonly githubClient: GitHubClient;
   private readonly anthropicClient: AnthropicClient;
   private readonly messagingClient: SlackMessagingClient;
+  private readonly messageCache: MessageCache | null;
+  private readonly repositoryContextCache: Map<string, RepositoryContext>;
 
   /**
    * Create a new SessionOrchestrator.
@@ -33,17 +44,21 @@ export class SessionOrchestrator {
    * @param githubClient - Client for GitHub repository exploration
    * @param anthropicClient - Client for Claude question generation
    * @param messagingClient - Client for Slack message posting
+   * @param messageCache - Optional message cache for conversation history
    */
   constructor(
     sessionManager: SessionManager,
     githubClient: GitHubClient,
     anthropicClient: AnthropicClient,
     messagingClient: SlackMessagingClient,
+    messageCache?: MessageCache,
   ) {
     this.sessionManager = sessionManager;
     this.githubClient = githubClient;
     this.anthropicClient = anthropicClient;
     this.messagingClient = messagingClient;
+    this.messageCache = messageCache ?? null;
+    this.repositoryContextCache = new Map();
   }
 
   /**
@@ -78,12 +93,18 @@ export class SessionOrchestrator {
 
     // Step 3: Explore repository if provided
     let repositoryContext: RepositoryContext | null = null;
+    const sessionId = `${command.channelId}:${threadTs}`;
 
     if (command.repository) {
       repositoryContext = await this.exploreRepositoryWithErrorHandling(
         command,
         threadTs,
       );
+
+      // Cache repository context for use in tool loop
+      if (repositoryContext) {
+        this.repositoryContextCache.set(sessionId, repositoryContext);
+      }
     }
 
     // Step 4: Generate and post first question
@@ -356,5 +377,155 @@ export class SessionOrchestrator {
       threadTs,
       message,
     );
+  }
+
+  /**
+   * Execute Claude Messages API tool loop for question-answer flow.
+   *
+   * Flow:
+   * 1. Append user message to conversation history
+   * 2. Call AnthropicClient.continueConversation() with full history
+   * 3. Post Claude's question to Slack thread
+   * 4. Update session confidence score
+   * 5. Transition to review phase if confidence >= 95%
+   *
+   * @param session - The active session
+   * @param userMessage - The user's answer/message
+   * @param userId - Slack user ID of the message author (e.g., "U1234567890")
+   * @param messageTs - Slack message timestamp (e.g., "1234567890.123456")
+   */
+  async runToolLoop(
+    session: Session,
+    userMessage: string,
+    userId: string,
+    messageTs: string,
+  ): Promise<void> {
+    // Parse channel ID and thread timestamp from session ID
+    const [channelId, threadTs] = session.session_id.split(":");
+
+    try {
+      // Step 1: Get message history from cache and append new user message
+      const messages = this.buildMessageHistory(session.session_id, userMessage, userId, messageTs);
+
+      // Step 2: Call Anthropic client with message history
+      const repositoryContext = this.getRepositoryContext(session);
+
+      const response = await this.anthropicClient.continueConversation(
+        messages,
+        repositoryContext,
+      );
+
+      // Step 3: Append bot response to cache
+      this.appendBotMessage(session.session_id, response.question, threadTs);
+
+      // Step 4: Post Claude's question to Slack thread
+      await this.messagingClient.postMessage(channelId, threadTs, response.question);
+
+      // Step 5: Update session confidence score
+      session.confidence_score = response.confidence_score;
+
+      // Step 6: Check for phase transition
+      if (response.confidence_score >= REVIEW_PHASE_THRESHOLD) {
+        session.phase = Phase.Review;
+      }
+
+      // Persist session updates
+      await this.sessionManager.updateSession(session);
+    } catch (error) {
+      // Post error message to Slack thread so user knows something went wrong
+      await this.postToolLoopError(channelId, threadTs, error);
+    }
+  }
+
+  /**
+   * Post error message when tool loop fails.
+   *
+   * Uses BaseError.toSlackMessage() for safe Slack display of typed errors.
+   *
+   * @param channelId - Slack channel ID
+   * @param threadTs - Thread timestamp
+   * @param error - The error that occurred
+   */
+  private async postToolLoopError(
+    channelId: string,
+    threadTs: string,
+    error: unknown,
+  ): Promise<void> {
+    let message: string;
+
+    if (error instanceof BaseError) {
+      message = `Unable to continue the conversation.\n\n${error.toSlackMessage()}`;
+    } else if (error instanceof Error) {
+      message = `Unable to continue the conversation.\n\n` +
+        `*Error:* ${error.message}\n\n` +
+        "Please try again or contact support if the issue persists.";
+    } else {
+      message = "Unable to continue the conversation due to an unexpected error.\n\n" +
+        "Please try again or contact support if the issue persists.";
+    }
+
+    await this.messagingClient.postMessage(channelId, threadTs, message);
+  }
+
+  /**
+   * Build message history from cache and append new user message.
+   *
+   * @param sessionId - Session identifier
+   * @param userMessage - New user message to append
+   * @param userId - Slack user ID of the message author
+   * @param messageTs - Slack message timestamp
+   * @returns Array of messages for Anthropic API
+   */
+  private buildMessageHistory(
+    sessionId: string,
+    userMessage: string,
+    userId: string,
+    messageTs: string,
+  ): Message[] {
+    // Get existing messages from cache
+    const existingMessages = this.messageCache?.get(sessionId) ?? [];
+
+    // Create new user message with actual user ID and timestamp
+    const newMessage: Message = {
+      sender: userId,
+      text: userMessage,
+      timestamp: messageTs,
+    };
+
+    // Append to cache
+    this.messageCache?.append(sessionId, newMessage);
+
+    // Return combined messages
+    return [...existingMessages, newMessage];
+  }
+
+  /**
+   * Append bot response message to cache.
+   *
+   * @param sessionId - Session identifier
+   * @param text - Bot response text
+   * @param threadTs - Thread timestamp for ordering
+   */
+  private appendBotMessage(sessionId: string, text: string, threadTs: string): void {
+    const botMessage: Message = {
+      sender: "bot",
+      text,
+      timestamp: threadTs,
+    };
+
+    this.messageCache?.append(sessionId, botMessage);
+  }
+
+  /**
+   * Get repository context for session if available.
+   *
+   * Retrieves the repository context that was cached during session initialization.
+   * Returns null if the session has no associated repository or if context was not cached.
+   *
+   * @param session - The active session
+   * @returns Repository context or null
+   */
+  private getRepositoryContext(session: Session): RepositoryContext | null {
+    return this.repositoryContextCache.get(session.session_id) ?? null;
   }
 }
