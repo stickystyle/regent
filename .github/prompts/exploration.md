@@ -41,6 +41,7 @@ You MUST respond with ONLY valid JSON matching this exact structure. Do not incl
 
 ```json
 {
+  "file_tree": "A text representation of the repository structure showing directories and key files. Use tree-style formatting with indentation. Include all directories but only show important files (entry points, configs, READMEs). Example:\n.\n├── src/\n│   ├── main.ts\n│   ├── config/\n│   ├── handlers/\n│   └── utils/\n├── tests/\n├── package.json\n└── README.md",
   "project_overview": "A clear description of what this project is, including the primary programming language(s), frameworks used, and the project's main purpose. Example: 'A TypeScript/Deno Slack bot application using the Slack ROSI platform for collaborative spec-driven development workflows.'",
   "architecture_summary": "A summary of the key directories, entry points, and main components. Example: 'Main entry: src/main.ts. Key directories: /functions (Slack function handlers), /workflows (workflow definitions), /lib (shared utilities). Uses event-driven architecture with Slack's function framework.'",
   "relevant_patterns": [
@@ -77,6 +78,7 @@ You MUST respond with ONLY valid JSON matching this exact structure. Do not incl
 
 - Be concise but informative in your descriptions
 - Focus on aspects relevant to extending or modifying the codebase
+- For `file_tree`: show the overall structure with directories expanded 2-3 levels deep; include key files like entry points, configs, and manifests; omit generated files, node_modules, .git, etc.
 - Include 3-8 items for arrays (patterns, integrations, key_files)
 - Use actual file paths from the codebase for key_files and relevant_files
 - If the codebase is small or simple, it's okay to have fewer items
