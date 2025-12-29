@@ -79,6 +79,60 @@ function createErrorResponse(
   return new Response(body, { status, headers });
 }
 
+/**
+ * Helper to create a mock response with MCP tool use and result content blocks.
+ *
+ * Anthropic's MCP connector executes tools server-side, so the response
+ * includes both mcp_tool_use and mcp_tool_result blocks in the same response.
+ */
+function createMockMCPResponse(
+  textContent: string,
+  mcpBlocks?: Array<{
+    toolUse: { id: string; name: string; server_name: string; input: Record<string, unknown> };
+    toolResult: { is_error: boolean; content: string };
+  }>,
+  stopReason: string = "end_turn",
+): Response {
+  const content: Array<Record<string, unknown>> = [];
+
+  // Add MCP tool use and result blocks
+  if (mcpBlocks) {
+    for (const block of mcpBlocks) {
+      content.push({
+        type: "mcp_tool_use",
+        id: block.toolUse.id,
+        name: block.toolUse.name,
+        server_name: block.toolUse.server_name,
+        input: block.toolUse.input,
+      });
+      content.push({
+        type: "mcp_tool_result",
+        tool_use_id: block.toolUse.id,
+        is_error: block.toolResult.is_error,
+        content: [{ type: "text", text: block.toolResult.content }],
+      });
+    }
+  }
+
+  // Add text content at the end
+  content.push({ type: "text", text: textContent });
+
+  const body = JSON.stringify({
+    id: "msg_test123",
+    type: "message",
+    role: "assistant",
+    content,
+    model: "claude-sonnet-4-20250514",
+    stop_reason: stopReason,
+    usage: { input_tokens: 100, output_tokens: 50 },
+  });
+
+  return new Response(body, {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 describe("AnthropicClient", () => {
   describe("MockAnthropicClient", () => {
     let client: MockAnthropicClient;
@@ -944,6 +998,567 @@ describe("AnthropicClient", () => {
         assertEquals(spec.goals.length, 3);
         assertEquals(spec.goals.includes("Add MFA support"), true);
         assertEquals(spec.open_questions.length, 0);
+      });
+    });
+
+    describe("MCP Server Configuration", () => {
+      it("should include mcp_servers array with url type when config provided", async () => {
+        let capturedBody: unknown = null;
+
+        const mockApi: MockAnthropicApi = {
+          post: async (_url: string, body: unknown, _headers?: Record<string, string>) => {
+            capturedBody = body;
+            return createMockResponse("Here is information from the code. I'm 50% confident.");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "What does the login function do?", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        await client.continueConversationWithMCP(messages, null, mcpConfig);
+
+        const body = capturedBody as Record<string, unknown>;
+        assertEquals(Array.isArray(body.mcp_servers), true);
+        const mcpServers = body.mcp_servers as Array<Record<string, unknown>>;
+        assertEquals(mcpServers.length, 1);
+        assertEquals(mcpServers[0].type, "url");
+        assertEquals(mcpServers[0].name, "github");
+        assertEquals(mcpServers[0].url, "https://api.githubcopilot.com/mcp/");
+        assertEquals(mcpServers[0].authorization_token, "ghp_test_token");
+      });
+
+      it("should include tools array with mcp_toolset type", async () => {
+        let capturedBody: unknown = null;
+
+        const mockApi: MockAnthropicApi = {
+          post: async (_url: string, body: unknown, _headers?: Record<string, string>) => {
+            capturedBody = body;
+            return createMockResponse("Response from MCP. I'm 50% confident.");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "Show me the auth code", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        await client.continueConversationWithMCP(messages, null, mcpConfig);
+
+        const body = capturedBody as Record<string, unknown>;
+        assertEquals(Array.isArray(body.tools), true);
+        const tools = body.tools as Array<Record<string, unknown>>;
+        assertEquals(tools.length, 1);
+        assertEquals(tools[0].type, "mcp_toolset");
+        assertEquals(tools[0].mcp_server_name, "github");
+      });
+
+      it("should use max_tokens: 4096 for MCP requests", async () => {
+        let capturedBody: unknown = null;
+
+        const mockApi: MockAnthropicApi = {
+          post: async (_url: string, body: unknown, _headers?: Record<string, string>) => {
+            capturedBody = body;
+            return createMockResponse("Response from MCP. I'm 50% confident.");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "Show me the auth code", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        await client.continueConversationWithMCP(messages, null, mcpConfig);
+
+        const body = capturedBody as Record<string, unknown>;
+        assertEquals(body.max_tokens, 4096);
+      });
+
+      it("should include anthropic-beta header for MCP requests", async () => {
+        let capturedHeaders: Record<string, string> | undefined = undefined;
+
+        const mockApi: MockAnthropicApi = {
+          post: async (
+            _url: string,
+            _body: unknown,
+            headers?: Record<string, string>,
+          ) => {
+            capturedHeaders = headers;
+            return createMockResponse("MCP response. I'm 50% confident.");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "Look up the config", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        await client.continueConversationWithMCP(messages, null, mcpConfig);
+
+        assertEquals(capturedHeaders?.["anthropic-beta"], "mcp-client-2025-04-04");
+        assertEquals(capturedHeaders?.["x-api-key"], "test-api-key");
+      });
+
+      it("should still work without MCP config (backward compatibility)", async () => {
+        let capturedBody: unknown = null;
+
+        const mockApi: MockAnthropicApi = {
+          post: async (_url: string, body: unknown, _headers?: Record<string, string>) => {
+            capturedBody = body;
+            return createMockResponse("Question? I'm 50% confident.");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "Test", timestamp: "123.456" },
+        ];
+
+        await client.continueConversation(messages, null);
+
+        const body = capturedBody as Record<string, unknown>;
+        assertEquals(body.mcp_servers === undefined, true);
+        assertEquals(body.max_tokens, 1024);
+      });
+    });
+
+    describe("MCP Server-Side Tool Execution", () => {
+      // Note: Anthropic's MCP connector executes tools SERVER-SIDE.
+      // The response includes both mcp_tool_use and mcp_tool_result blocks
+      // in a single response. No client-side tool loop is needed.
+
+      it("should handle response with mcp_tool_use and mcp_tool_result blocks", async () => {
+        let callCount = 0;
+
+        const mockApi: MockAnthropicApi = {
+          post: async () => {
+            callCount++;
+            // Single response with tool execution results already included
+            return createMockMCPResponse(
+              "Based on the code search, the login function handles OAuth. I'm 60% confident.",
+              [
+                {
+                  toolUse: {
+                    id: "mcptoolu_1",
+                    name: "search_code",
+                    server_name: "github",
+                    input: { query: "login function" },
+                  },
+                  toolResult: {
+                    is_error: false,
+                    content: "Found 3 matches for login function...",
+                  },
+                },
+              ],
+            );
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "What does the login function do?", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        const response = await client.continueConversationWithMCP(messages, null, mcpConfig);
+
+        // Only ONE API call - Anthropic handles tool execution server-side
+        assertEquals(callCount, 1);
+        assertEquals(response.question.includes("login function"), true);
+        assertEquals(response.confidence_score, 60);
+      });
+
+      it("should handle multiple tool executions in single response", async () => {
+        let callCount = 0;
+
+        const mockApi: MockAnthropicApi = {
+          post: async () => {
+            callCount++;
+            return createMockMCPResponse(
+              "Found both pieces of info. I'm 70% confident.",
+              [
+                {
+                  toolUse: {
+                    id: "mcptoolu_1",
+                    name: "search_code",
+                    server_name: "github",
+                    input: { query: "login" },
+                  },
+                  toolResult: {
+                    is_error: false,
+                    content: "Found login implementation...",
+                  },
+                },
+                {
+                  toolUse: {
+                    id: "mcptoolu_2",
+                    name: "get_file_contents",
+                    server_name: "github",
+                    input: { path: "src/config.ts" },
+                  },
+                  toolResult: {
+                    is_error: false,
+                    content: "export const config = {...}",
+                  },
+                },
+              ],
+            );
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "Find login and show config", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        const response = await client.continueConversationWithMCP(messages, null, mcpConfig);
+
+        // Single API call - all tools executed server-side
+        assertEquals(callCount, 1);
+        assertEquals(response.confidence_score, 70);
+      });
+
+      it("should handle response without tool use (text only)", async () => {
+        let callCount = 0;
+
+        const mockApi: MockAnthropicApi = {
+          post: async () => {
+            callCount++;
+            return createMockResponse(
+              "OAuth is an open standard for authorization. I'm 50% confident.",
+            );
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "What is OAuth?", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        const response = await client.continueConversationWithMCP(messages, null, mcpConfig);
+
+        assertEquals(callCount, 1);
+        assertEquals(response.question.includes("OAuth"), true);
+        assertEquals(response.confidence_score, 50);
+      });
+
+      it("should extract text content from response with MCP blocks", async () => {
+        const mockApi: MockAnthropicApi = {
+          post: async () => {
+            return createMockMCPResponse(
+              "The auth module uses JWT tokens. I'm 75% confident.",
+              [
+                {
+                  toolUse: {
+                    id: "mcptoolu_1",
+                    name: "get_file_contents",
+                    server_name: "github",
+                    input: { path: "src/auth.ts" },
+                  },
+                  toolResult: {
+                    is_error: false,
+                    content: "import jwt from 'jsonwebtoken';",
+                  },
+                },
+              ],
+            );
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "Show auth module", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        const response = await client.continueConversationWithMCP(messages, null, mcpConfig);
+
+        // Should extract the text content, not the tool blocks
+        assertEquals(response.question.includes("JWT tokens"), true);
+        assertEquals(response.confidence_score, 75);
+      });
+    });
+
+    describe("MCP Error Handling", () => {
+      it("should retry on rate limit error", async () => {
+        let callCount = 0;
+
+        const mockApi: MockAnthropicApi = {
+          post: async () => {
+            callCount++;
+            if (callCount === 1) {
+              return createErrorResponse(429, "rate_limit_error", "Rate limited", 1);
+            }
+            return createMockResponse("Response after retry. I'm 50% confident.");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "Search code", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        const response = await client.continueConversationWithMCP(messages, null, mcpConfig);
+
+        assertEquals(callCount, 2);
+        assertEquals(typeof response.question, "string");
+      });
+
+      it("should retry on network timeout error", async () => {
+        let callCount = 0;
+
+        const mockApi: MockAnthropicApi = {
+          post: async () => {
+            callCount++;
+            if (callCount === 1) {
+              return createErrorResponse(500, "server_error", "Internal server error");
+            }
+            return createMockResponse("Response after retry. I'm 50% confident.");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "Search code", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        const response = await client.continueConversationWithMCP(messages, null, mcpConfig);
+
+        assertEquals(callCount, 2);
+        assertEquals(typeof response.question, "string");
+      });
+
+      it("should throw after exhausting retries", async () => {
+        let callCount = 0;
+
+        const mockApi: MockAnthropicApi = {
+          post: async () => {
+            callCount++;
+            return createErrorResponse(500, "server_error", "Persistent server error");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "Search code", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        await assertRejects(
+          () => client.continueConversationWithMCP(messages, null, mcpConfig),
+          NetworkTimeoutError,
+        );
+
+        assertEquals(callCount, 3); // maxAttempts = 3
+      });
+
+      it("should not retry permanent errors", async () => {
+        let callCount = 0;
+
+        const mockApi: MockAnthropicApi = {
+          post: async () => {
+            callCount++;
+            return createErrorResponse(400, "invalid_request_error", "Invalid request");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "Search code", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        await assertRejects(
+          () => client.continueConversationWithMCP(messages, null, mcpConfig),
+          AnthropicModelError,
+        );
+
+        assertEquals(callCount, 1); // No retries for permanent errors
+      });
+
+      it("should provide fallback response on empty text", async () => {
+        const mockApi: MockAnthropicApi = {
+          post: async () => {
+            // Response with tool blocks but no text
+            return createMockMCPResponse(
+              "", // Empty text
+              [
+                {
+                  toolUse: {
+                    id: "mcptoolu_1",
+                    name: "search_code",
+                    server_name: "github",
+                    input: { query: "test" },
+                  },
+                  toolResult: {
+                    is_error: true,
+                    content: "No results found",
+                  },
+                },
+              ],
+            );
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "Search for something", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        const response = await client.continueConversationWithMCP(messages, null, mcpConfig);
+
+        // Should provide fallback text
+        assertEquals(response.question, "I need more information to proceed.");
+        assertEquals(response.confidence_score, 0);
+      });
+    });
+
+    describe("MCP Response Properties", () => {
+      it("should complete within reasonable time (no client-side loop)", async () => {
+        const startTime = Date.now();
+
+        const mockApi: MockAnthropicApi = {
+          post: async () => {
+            return createMockMCPResponse(
+              "Quick response. I'm 80% confident.",
+              [
+                {
+                  toolUse: {
+                    id: "mcptoolu_1",
+                    name: "search_code",
+                    server_name: "github",
+                    input: { query: "test" },
+                  },
+                  toolResult: {
+                    is_error: false,
+                    content: "Found results...",
+                  },
+                },
+              ],
+            );
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "Quick search", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        await client.continueConversationWithMCP(messages, null, mcpConfig);
+
+        const elapsed = Date.now() - startTime;
+
+        // Single API call should complete very fast with mocked responses
+        assertEquals(elapsed < 1000, true, `Expected fast completion, took ${elapsed}ms`);
+      });
+
+      it("should always return valid response structure", async () => {
+        const mockApi: MockAnthropicApi = {
+          post: async () => {
+            return createMockMCPResponse(
+              "Valid response. I'm 85% confident.",
+            );
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U123", text: "Property test", timestamp: "123.456" },
+        ];
+        const mcpConfig = {
+          github: {
+            url: "https://api.githubcopilot.com/mcp/",
+            authorization_token: "ghp_test_token",
+          },
+        };
+
+        const response = await client.continueConversationWithMCP(messages, null, mcpConfig);
+
+        // Property: Response always has valid structure
+        assertEquals(typeof response.question, "string");
+        assertEquals(typeof response.confidence_score, "number");
+        assertEquals(response.confidence_score >= 0 && response.confidence_score <= 100, true);
       });
     });
   });

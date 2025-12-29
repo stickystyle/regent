@@ -122,6 +122,86 @@ export interface AnthropicMessage {
 }
 
 /**
+ * MCP server configuration for GitHub.
+ *
+ * SECURITY NOTE: The authorization_token field contains a GitHub PAT.
+ * This value is sensitive and MUST NOT be logged or exposed in error messages.
+ * The anthropicApi abstraction layer should not log request bodies.
+ */
+export interface MCPGitHubConfig {
+  /** MCP server URL */
+  url: string;
+
+  /**
+   * GitHub PAT with repo scope.
+   * SENSITIVE: Do not log this value.
+   */
+  authorization_token: string;
+}
+
+/**
+ * MCP server configuration for Anthropic API requests.
+ */
+export interface MCPServerConfig {
+  /** GitHub MCP server configuration */
+  github?: MCPGitHubConfig;
+}
+
+/**
+ * Options for MCP-enabled conversation requests.
+ */
+export interface MCPConversationOptions {
+  /** Timeout in milliseconds (default: 55000 to stay within 60s ROSI limit) */
+  timeoutMs?: number;
+
+  /** Maximum tool loop iterations (default: 10) */
+  maxIterations?: number;
+}
+
+/**
+ * MCP tool use content block from Anthropic API response.
+ *
+ * When using Anthropic's MCP connector, the response includes these blocks
+ * showing which tools Claude called. The actual execution happens server-side.
+ */
+export interface MCPToolUseBlock {
+  /** Content type: always "mcp_tool_use" */
+  type: "mcp_tool_use";
+
+  /** Unique identifier for this tool use */
+  id: string;
+
+  /** Tool name (e.g., "search_code") */
+  name: string;
+
+  /** MCP server name that provides this tool */
+  server_name: string;
+
+  /** Tool input parameters */
+  input: Record<string, unknown>;
+}
+
+/**
+ * MCP tool result content block from Anthropic API response.
+ *
+ * Anthropic's MCP connector executes tools server-side and includes
+ * results in the same response as the tool use blocks.
+ */
+export interface MCPToolResultBlock {
+  /** Content type: always "mcp_tool_result" */
+  type: "mcp_tool_result";
+
+  /** ID of the tool use this corresponds to */
+  tool_use_id: string;
+
+  /** Whether the tool execution resulted in an error */
+  is_error: boolean;
+
+  /** Result content from the tool execution */
+  content: Array<{ type: string; text?: string }>;
+}
+
+/**
  * AnthropicClient abstracts Anthropic Messages API operations for brainstorming.
  *
  * This interface enables dependency injection, allowing tests to use mock
@@ -169,6 +249,26 @@ export interface AnthropicClient {
    * @returns Confidence score (0-100), or 0 if not found
    */
   extractConfidenceScore(response: AnthropicMessage): number;
+
+  /**
+   * Generate next question with MCP server access for code lookups.
+   *
+   * Uses Anthropic's MCP connector to allow Claude to search and read
+   * code from GitHub during the conversation. Tool calls are executed
+   * server-side by Anthropic's MCP infrastructure.
+   *
+   * @param messages - Conversation history (user and bot messages)
+   * @param repoContext - Optional repository context for contextual questions
+   * @param mcpConfig - MCP server configuration (GitHub PAT)
+   * @param options - Optional timeout and iteration limits
+   * @returns Question response with text and confidence score
+   */
+  continueConversationWithMCP(
+    messages: Message[],
+    repoContext: RepositoryContext | null,
+    mcpConfig: MCPServerConfig,
+    options?: MCPConversationOptions,
+  ): Promise<QuestionResponse>;
 }
 
 /**
@@ -326,6 +426,16 @@ export class MockAnthropicClient implements AnthropicClient {
   extractConfidenceScore(response: AnthropicMessage): number {
     const text = extractTextContent(response);
     return parseConfidenceFromText(text);
+  }
+
+  continueConversationWithMCP(
+    messages: Message[],
+    repoContext: RepositoryContext | null,
+    _mcpConfig: MCPServerConfig,
+    _options?: MCPConversationOptions,
+  ): Promise<QuestionResponse> {
+    // For mock, delegate to regular continueConversation
+    return this.continueConversation(messages, repoContext);
   }
 }
 
@@ -754,5 +864,88 @@ RULES:
         open_questions: [],
       };
     }
+  }
+
+  /**
+   * Get headers for MCP-enabled requests.
+   *
+   * Includes the beta header required for MCP connector.
+   * Uses the current version of the MCP connector beta.
+   */
+  private getMCPHeaders(): Record<string, string> {
+    return {
+      ...this.getHeaders(),
+      "anthropic-beta": "mcp-client-2025-04-04",
+    };
+  }
+
+  /**
+   * Continue conversation with MCP server access for code lookups.
+   *
+   * Uses Anthropic's MCP connector which executes tools SERVER-SIDE.
+   * The response includes both mcp_tool_use and mcp_tool_result blocks,
+   * meaning Anthropic handles all tool execution internally. No client-side
+   * tool loop is needed.
+   *
+   * @param messages - Conversation history
+   * @param repoContext - Optional repository context
+   * @param mcpConfig - MCP server configuration (contains sensitive GitHub PAT)
+   * @param _options - Optional timeout settings (kept for API compatibility)
+   * @returns Question response with text and confidence score
+   */
+  async continueConversationWithMCP(
+    messages: Message[],
+    repoContext: RepositoryContext | null,
+    mcpConfig: MCPServerConfig,
+    _options?: MCPConversationOptions,
+  ): Promise<QuestionResponse> {
+    return await this.executeWithRateLimitAwareRetry(async () => {
+      // Build request body with MCP servers config
+      // Anthropic's MCP connector handles tool execution server-side
+      const requestBody: Record<string, unknown> = {
+        model: this.model,
+        max_tokens: 4096, // Higher for MCP to accommodate tool content
+        system: this.buildQuestioningSystemPrompt(repoContext),
+        messages: this.formatMessages(messages),
+      };
+
+      // Add MCP server config if provided
+      // The response will include mcp_tool_use and mcp_tool_result blocks
+      // showing what tools were called and their results
+      if (mcpConfig.github) {
+        requestBody.mcp_servers = [
+          {
+            type: "url",
+            url: mcpConfig.github.url,
+            name: "github",
+            authorization_token: mcpConfig.github.authorization_token,
+          },
+        ];
+        requestBody.tools = [
+          {
+            type: "mcp_toolset",
+            mcp_server_name: "github",
+          },
+        ];
+      }
+
+      const response = await this.anthropicApi.post(
+        this.baseUrl,
+        requestBody,
+        this.getMCPHeaders(),
+      );
+
+      const anthropicResponse = await this.handleResponse(response);
+
+      // Extract text content from response
+      // Tool uses and results are handled server-side by Anthropic
+      const text = extractTextContent(anthropicResponse);
+      const finalText = text || "I need more information to proceed.";
+
+      return {
+        question: finalText,
+        confidence_score: this.extractConfidenceScore(anthropicResponse),
+      };
+    });
   }
 }
