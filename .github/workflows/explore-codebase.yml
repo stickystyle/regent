@@ -1,0 +1,267 @@
+# ABOUTME: GitHub Actions workflow for deep codebase exploration using Claude Code CLI.
+# ABOUTME: Triggered by workflow_dispatch, explores a target repo and POSTs results to callback URL.
+
+name: Explore Codebase
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: 'Repository to explore (owner/repo format)'
+        required: true
+        type: string
+      idea:
+        description: 'The idea/feature being brainstormed'
+        required: true
+        type: string
+      callback_url:
+        description: 'URL to POST results to'
+        required: true
+        type: string
+      session_id:
+        description: 'Session ID for correlation'
+        required: true
+        type: string
+
+# Prevent concurrent explorations for the same session
+concurrency:
+  group: exploration-${{ inputs.session_id }}
+  cancel-in-progress: true
+
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Validate inputs
+        id: validate
+        env:
+          TARGET_REPO: ${{ inputs.target_repo }}
+          CALLBACK_URL: ${{ inputs.callback_url }}
+          SESSION_ID: ${{ inputs.session_id }}
+        run: |
+          # Validate target_repo format (owner/repo, alphanumeric with dots, dashes, underscores)
+          if ! [[ "$TARGET_REPO" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]; then
+            echo "::error::Invalid target_repo format: must be 'owner/repo'"
+            exit 1
+          fi
+
+          # Validate callback_url is HTTPS
+          if ! [[ "$CALLBACK_URL" =~ ^https:// ]]; then
+            echo "::error::Invalid callback_url: must use HTTPS"
+            exit 1
+          fi
+
+          # Validate session_id is non-empty and alphanumeric (with dashes/underscores)
+          if ! [[ "$SESSION_ID" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            echo "::error::Invalid session_id format"
+            exit 1
+          fi
+
+          echo "All inputs validated successfully"
+
+      - name: Checkout this repo (for prompt template)
+        uses: actions/checkout@v4
+
+      - name: Clone target repository
+        id: clone
+        continue-on-error: true
+        env:
+          TARGET_REPO: ${{ inputs.target_repo }}
+          REPO_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
+        run: |
+          echo "Cloning repository..."
+          # Use git credential helper to avoid embedding token in URL
+          git config --global credential.helper store
+          echo "https://x-access-token:${REPO_TOKEN}@github.com" > ~/.git-credentials
+
+          # Clone with credentials from helper (token not in command line)
+          if ! git clone --depth 1 "https://github.com/${TARGET_REPO}.git" ./target-repo 2>&1; then
+            echo "clone_error=Failed to clone repository" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          # Clean up credentials file
+          rm -f ~/.git-credentials
+          echo "clone_success=true" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        if: steps.clone.outcome == 'success'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code CLI
+        if: steps.clone.outcome == 'success'
+        id: install
+        continue-on-error: true
+        run: |
+          if ! npm install -g @anthropic-ai/claude-code 2>&1; then
+            echo "install_error=Failed to install Claude Code CLI" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          echo "install_success=true" >> $GITHUB_OUTPUT
+
+      - name: Run codebase exploration
+        if: steps.clone.outcome == 'success' && steps.install.outcome == 'success'
+        id: explore
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          IDEA: ${{ inputs.idea }}
+        run: |
+          cd ./target-repo
+
+          # Read the exploration prompt template
+          PROMPT_TEMPLATE=$(cat "$GITHUB_WORKSPACE/.github/prompts/exploration.md")
+
+          # Write the full prompt to a temp file to avoid heredoc expansion issues
+          # Using printf to safely handle special characters
+          {
+            printf '%s\n\n' "$PROMPT_TEMPLATE"
+            printf '## Context for This Exploration\n\n'
+            printf 'The user is brainstorming the following idea/feature:\n\n'
+            printf '%s\n\n' "$IDEA"
+            printf 'Focus your analysis on aspects of the codebase most relevant to implementing this idea.\n'
+          } > /tmp/exploration_prompt.txt
+
+          # Run Claude Code CLI and capture output
+          echo "Running Claude Code exploration..."
+          if ! claude --print "$(cat /tmp/exploration_prompt.txt)" > "$GITHUB_WORKSPACE/exploration_output.txt" 2>&1; then
+            echo "explore_error=Claude Code CLI failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          echo "explore_success=true" >> $GITHUB_OUTPUT
+
+      - name: Parse and send success callback
+        if: steps.explore.outcome == 'success'
+        env:
+          CALLBACK_URL: ${{ inputs.callback_url }}
+          SESSION_ID: ${{ inputs.session_id }}
+          CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+        run: |
+          # Read the exploration output
+          EXPLORATION_OUTPUT=$(cat "$GITHUB_WORKSPACE/exploration_output.txt")
+
+          # Try to extract valid JSON from the output
+          # First, try the whole output as JSON
+          if echo "$EXPLORATION_OUTPUT" | jq -e . > /dev/null 2>&1; then
+            EXPLORATION_CONTEXT="$EXPLORATION_OUTPUT"
+          else
+            # Try to extract JSON object from mixed content
+            # Look for the outermost { } pair that forms valid JSON
+            EXPLORATION_CONTEXT=$(echo "$EXPLORATION_OUTPUT" | \
+              grep -Pzo '(?s)\{.*\}' | \
+              tr '\0' '\n' | \
+              jq -e . 2>/dev/null || echo "")
+
+            if [ -z "$EXPLORATION_CONTEXT" ]; then
+              # If still not valid JSON, create a fallback response with raw output
+              EXPLORATION_CONTEXT=$(jq -n \
+                --arg overview "$EXPLORATION_OUTPUT" \
+                '{
+                  project_overview: $overview,
+                  architecture_summary: "Unable to parse structured output from Claude",
+                  relevant_patterns: [],
+                  integration_points: [],
+                  testing_approach: "See project_overview for raw analysis",
+                  key_files: [],
+                  idea_related_code: {
+                    summary: "Unable to parse structured output - see project_overview for raw analysis",
+                    existing_similar_features: [],
+                    relevant_files: [],
+                    suggested_integration_points: []
+                  }
+                }')
+            fi
+          fi
+
+          # Construct the callback payload
+          PAYLOAD=$(jq -n \
+            --arg session_id "$SESSION_ID" \
+            --argjson context "$EXPLORATION_CONTEXT" \
+            '{
+              session_id: $session_id,
+              status: "success",
+              exploration_context: $context
+            }')
+
+          echo "Sending success callback..."
+
+          # Retry logic for transient failures (up to 3 attempts)
+          MAX_RETRIES=3
+          RETRY_DELAY=5
+          for i in $(seq 1 $MAX_RETRIES); do
+            if curl -X POST "$CALLBACK_URL" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $CALLBACK_SECRET" \
+              -d "$PAYLOAD" \
+              --fail --silent --show-error --max-time 30; then
+              echo "Callback sent successfully"
+              exit 0
+            fi
+            echo "Callback attempt $i failed, retrying in ${RETRY_DELAY}s..."
+            sleep $RETRY_DELAY
+          done
+
+          echo "::warning::Failed to send success callback after $MAX_RETRIES attempts"
+          exit 1
+
+      - name: Send error callback
+        if: steps.clone.outcome == 'failure' || steps.install.outcome == 'failure' || steps.explore.outcome == 'failure'
+        env:
+          CALLBACK_URL: ${{ inputs.callback_url }}
+          SESSION_ID: ${{ inputs.session_id }}
+          CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CLONE_OUTCOME: ${{ steps.clone.outcome }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          CLONE_ERROR: ${{ steps.clone.outputs.clone_error }}
+          INSTALL_ERROR: ${{ steps.install.outputs.install_error }}
+          EXPLORE_ERROR: ${{ steps.explore.outputs.explore_error }}
+        run: |
+          # Determine error message and code based on which step failed
+          if [ "$CLONE_OUTCOME" == "failure" ]; then
+            ERROR_MESSAGE="${CLONE_ERROR:-Failed to clone repository}"
+            ERROR_CODE="CLONE_FAILED"
+          elif [ "$INSTALL_OUTCOME" == "failure" ]; then
+            ERROR_MESSAGE="${INSTALL_ERROR:-Failed to install Claude Code CLI}"
+            ERROR_CODE="INSTALL_FAILED"
+          else
+            ERROR_MESSAGE="${EXPLORE_ERROR:-Exploration failed}"
+            ERROR_CODE="EXPLORATION_FAILED"
+          fi
+
+          # Construct error payload
+          PAYLOAD=$(jq -n \
+            --arg session_id "$SESSION_ID" \
+            --arg message "$ERROR_MESSAGE" \
+            --arg code "$ERROR_CODE" \
+            '{
+              session_id: $session_id,
+              status: "error",
+              error: {
+                message: $message,
+                code: $code
+              }
+            }')
+
+          echo "Sending error callback..."
+
+          # Retry logic for transient failures (up to 3 attempts)
+          MAX_RETRIES=3
+          RETRY_DELAY=5
+          for i in $(seq 1 $MAX_RETRIES); do
+            if curl -X POST "$CALLBACK_URL" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $CALLBACK_SECRET" \
+              -d "$PAYLOAD" \
+              --fail --silent --show-error --max-time 30; then
+              echo "Error callback sent successfully"
+              exit 0
+            fi
+            echo "Callback attempt $i failed, retrying in ${RETRY_DELAY}s..."
+            sleep $RETRY_DELAY
+          done
+
+          echo "::warning::Failed to send error callback after $MAX_RETRIES attempts"
