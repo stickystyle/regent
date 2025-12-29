@@ -127,3 +127,42 @@ export interface Session {
 export function formatSessionId(channelId: string, threadTs: string): string {
   return `${channelId}:${threadTs}`;
 }
+
+/**
+ * Parses a session ID into its component parts.
+ *
+ * Session IDs are in the format "channelId:threadTs".
+ *
+ * @param sessionId - Session ID to parse (e.g., "C1234567890:1234567890.123456")
+ * @returns Object with channelId and threadTs, or null if invalid
+ *
+ * @example
+ * ```ts
+ * const parts = parseSessionId("C1234567890:1234567890.123456");
+ * // Returns: { channelId: "C1234567890", threadTs: "1234567890.123456" }
+ *
+ * const invalid = parseSessionId("invalid");
+ * // Returns: null
+ * ```
+ */
+export function parseSessionId(
+  sessionId: string,
+): { channelId: string; threadTs: string } | null {
+  if (!sessionId) {
+    return null;
+  }
+
+  const colonIndex = sessionId.indexOf(":");
+  if (colonIndex === -1) {
+    return null;
+  }
+
+  const channelId = sessionId.slice(0, colonIndex);
+  const threadTs = sessionId.slice(colonIndex + 1);
+
+  if (!channelId || !threadTs) {
+    return null;
+  }
+
+  return { channelId, threadTs };
+}

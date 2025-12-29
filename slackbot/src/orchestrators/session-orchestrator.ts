@@ -8,10 +8,14 @@ import { BaseError, GitHubAccessError, ValidationError } from "../errors/types.t
 import type { MessageCache } from "../managers/message-cache.ts";
 import type { SessionManager } from "../managers/session-manager.ts";
 import type { Message } from "../types/message.ts";
-import type { RepositoryContext } from "../types/repository-context.ts";
-import { Phase } from "../types/session.ts";
+import type { RepositoryContext, RelevantFile } from "../types/repository-context.ts";
+import { Framework } from "../types/repository-context.ts";
+import type { ExplorationContext } from "../types/exploration-callback.ts";
+import { parseSessionId, Phase } from "../types/session.ts";
 import type { Session } from "../types/session.ts";
 import type { SlashCommand } from "../types/slash-command.ts";
+import type { ExplorationCallback } from "../types/exploration-callback.ts";
+import { isExplorationSuccess } from "../types/exploration-callback.ts";
 
 /**
  * Confidence threshold for transitioning from questioning to review phase.
@@ -527,5 +531,202 @@ export class SessionOrchestrator {
    */
   private getRepositoryContext(session: Session): RepositoryContext | null {
     return this.repositoryContextCache.get(session.session_id) ?? null;
+  }
+
+  /**
+   * Handle exploration result callback from GitHub Actions workflow.
+   *
+   * Flow:
+   * 1. Parse session_id to extract channelId and threadTs
+   * 2. Load session from SessionManager
+   * 3. If success: store exploration_context, update phase, post summary
+   * 4. If error: post error message and offer to continue
+   *
+   * @param callback - The exploration callback from GitHub Actions
+   */
+  async handleExplorationResult(callback: ExplorationCallback): Promise<void> {
+    // Parse session ID to get channelId and threadTs
+    const sessionParts = parseSessionId(callback.session_id);
+    if (!sessionParts) {
+      // Invalid session ID format - nothing to do
+      return;
+    }
+
+    const { channelId, threadTs } = sessionParts;
+
+    // Load session
+    const session = await this.sessionManager.loadSession(channelId, threadTs);
+    if (!session) {
+      // Session not found - nothing to do
+      return;
+    }
+
+    if (isExplorationSuccess(callback)) {
+      // Handle success case
+      await this.handleExplorationSuccess(callback, session, channelId, threadTs);
+    } else {
+      // Handle error case
+      await this.handleExplorationFailure(callback, channelId, threadTs);
+    }
+  }
+
+  /**
+   * Handle successful exploration callback.
+   *
+   * @param callback - Success callback with exploration context
+   * @param session - The active session
+   * @param channelId - Slack channel ID
+   * @param threadTs - Thread timestamp
+   */
+  private async handleExplorationSuccess(
+    callback: ExplorationCallback & { status: "success" },
+    session: Session,
+    channelId: string,
+    threadTs: string,
+  ): Promise<void> {
+    // Convert and store exploration context
+    const repositoryContext = this.convertExplorationContext(
+      callback.exploration_context,
+      session.repository ?? "",
+    );
+    const sessionId = `${channelId}:${threadTs}`;
+    this.repositoryContextCache.set(sessionId, repositoryContext);
+
+    // Post exploration summary
+    const summaryMessage = this.formatExplorationSummaryFromCallback(callback);
+    await this.messagingClient.postMessage(channelId, threadTs, summaryMessage);
+
+    // Ensure session is in questioning phase
+    if (session.phase !== Phase.Questioning) {
+      session.phase = Phase.Questioning;
+      await this.sessionManager.updateSession(session);
+    }
+
+    // Generate and post first question
+    await this.generateFirstQuestionFromCallback(
+      session,
+      channelId,
+      threadTs,
+      repositoryContext,
+    );
+  }
+
+  /**
+   * Convert ExplorationContext from callback to RepositoryContext format.
+   *
+   * @param ctx - Exploration context from callback
+   * @param repository - Repository name in owner/repo format
+   * @returns Converted RepositoryContext
+   */
+  private convertExplorationContext(
+    ctx: ExplorationContext,
+    repository: string,
+  ): RepositoryContext {
+    // Convert key_files to RelevantFile format
+    const relevantFiles: RelevantFile[] = (ctx.key_files ?? []).map(
+      (path) => ({
+        path,
+        description: "",
+      }),
+    );
+
+    return {
+      repository,
+      framework: Framework.Unknown,
+      patterns: ctx.relevant_patterns ?? [],
+      relevant_files: relevantFiles,
+      structure: ctx.file_tree ?? "",
+    };
+  }
+
+  /**
+   * Generate and post first question after exploration callback.
+   *
+   * @param _session - The active session (currently unused, reserved for future use)
+   * @param channelId - Slack channel ID
+   * @param threadTs - Thread timestamp
+   * @param repositoryContext - Repository context from exploration
+   */
+  private async generateFirstQuestionFromCallback(
+    _session: Session,
+    channelId: string,
+    threadTs: string,
+    repositoryContext: RepositoryContext,
+  ): Promise<void> {
+    try {
+      // Build initial messages (empty for callback flow - no initial idea)
+      const messages: Message[] = [];
+
+      // Generate first question from Claude
+      const response = await this.anthropicClient.continueConversation(
+        messages,
+        repositoryContext,
+      );
+
+      // Post the question to the thread
+      await this.messagingClient.postMessage(channelId, threadTs, response.question);
+    } catch (error) {
+      // Post error message to Slack thread
+      await this.postToolLoopError(channelId, threadTs, error);
+    }
+  }
+
+  /**
+   * Format exploration summary from callback context.
+   *
+   * @param callback - Success callback with exploration context
+   * @returns Formatted message string
+   */
+  private formatExplorationSummaryFromCallback(
+    callback: ExplorationCallback & { status: "success" },
+  ): string {
+    const ctx = callback.exploration_context;
+    const lines: string[] = ["Repository exploration complete:"];
+
+    if (ctx.project_overview) {
+      lines.push(`- Overview: ${ctx.project_overview}`);
+    }
+
+    if (ctx.architecture_summary) {
+      lines.push(`- Architecture: ${ctx.architecture_summary}`);
+    }
+
+    if (ctx.relevant_patterns && ctx.relevant_patterns.length > 0) {
+      lines.push(`- Patterns: ${ctx.relevant_patterns.join(", ")}`);
+    }
+
+    if (ctx.key_files && ctx.key_files.length > 0) {
+      lines.push(`- Found ${ctx.key_files.length} key files`);
+    }
+
+    if (ctx.testing_approach) {
+      lines.push(`- Testing: ${ctx.testing_approach}`);
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * Handle failed exploration callback.
+   *
+   * @param callback - Error callback with error details
+   * @param channelId - Slack channel ID
+   * @param threadTs - Thread timestamp
+   */
+  private async handleExplorationFailure(
+    callback: ExplorationCallback & { status: "error" },
+    channelId: string,
+    threadTs: string,
+  ): Promise<void> {
+    const lines: string[] = [
+      `:warning: *Exploration failed*`,
+      "",
+      `*Error:* ${callback.error.message}`,
+      `*Code:* ${callback.error.code}`,
+      "",
+      "I'll continue without repository context.",
+    ];
+
+    await this.messagingClient.postMessage(channelId, threadTs, lines.join("\n"));
   }
 }
