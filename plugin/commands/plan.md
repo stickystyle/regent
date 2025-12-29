@@ -281,11 +281,11 @@ EOF
 
 #### Update Issue Descriptions
 
-For each issue in UPDATE category:
+For each issue in UPDATE category, include the current spec hash for validation. Use unquoted `EOF` so variables expand:
 
 ```bash
-gh issue edit {number} --body "$(cat <<'EOF'
-Parent Epic: #{epic_number}
+gh issue edit {number} --body "$(cat <<EOF
+Parent Epic: #${EPIC_NUM}
 
 ## Task Description
 
@@ -294,6 +294,9 @@ Parent Epic: #{epic_number}
 ## Acceptance Criteria
 
 {criteria derived from design.md or requirements.md}
+
+<!-- REGENT_SPEC_HASH:${SPEC_HASH} -->
+<!-- REGENT_SPEC_TIMESTAMPS:brainstorm=${BRAINSTORM_UPDATED_AT:-},design=${DESIGN_UPDATED_AT:-},requirements=${REQUIREMENTS_UPDATED_AT:-} -->
 
 ---
 *Updated by [Regent](https://github.com/stickystyle/regent) during pivot reconciliation*
@@ -411,13 +414,16 @@ Create GitHub issues for each task, linked to the existing Epic.
    ```
 
 2. **For each task in the generated task list, create a GitHub issue:**
+
+   The issue body must include the spec hash for validation during execution. Use unquoted `EOF` so variables expand:
+
    ```bash
    gh issue create \
      --title "Task {N}: {task title}" \
      --label "regent" \
      --label "spec:{spec-name}" \
-     --body "$(cat <<'EOF'
-   Parent Epic: #{epic_number}
+     --body "$(cat <<EOF
+   Parent Epic: #${EPIC_NUM}
 
    ## Task Description
 
@@ -427,11 +433,16 @@ Create GitHub issues for each task, linked to the existing Epic.
 
    {criteria derived from design.md or requirements.md}
 
+   <!-- REGENT_SPEC_HASH:${SPEC_HASH} -->
+   <!-- REGENT_SPEC_TIMESTAMPS:brainstorm=${BRAINSTORM_UPDATED_AT:-},design=${DESIGN_UPDATED_AT:-},requirements=${REQUIREMENTS_UPDATED_AT:-} -->
+
    ---
    *Managed by [Regent](https://github.com/stickystyle/regent)*
    EOF
    )"
    ```
+
+   The `SPEC_HASH` and timestamp variables are set by `fetch-epic-specs.sh` in Phase 0.
 
 3. **Track created issues:**
    - Collect all newly created issue numbers and their IDs

@@ -39,26 +39,41 @@ mkdir -p "$SPECS_DIR"
 # Fetch ALL comments in ONE API call (with pagination for large epics)
 COMMENTS=$(gh api "repos/$OWNER/$REPO/issues/$EPIC_NUM/comments" --paginate)
 
-# Extract and write each spec type
+# Extract and write each spec type (with timestamps for hash validation)
 FOUND_BRAINSTORM=""
 FOUND_REQUIREMENTS=""
 FOUND_DESIGN=""
+BRAINSTORM_UPDATED_AT=""
+REQUIREMENTS_UPDATED_AT=""
+DESIGN_UPDATED_AT=""
 
 for SPEC_TYPE in brainstorm requirements design; do
-  # Extract content from comment, removing the wrapper
-  CONTENT=$(echo "$COMMENTS" | jq -r --arg type "$SPEC_TYPE" \
-    '[.[] | select(.body | test("REGENT_SPEC:" + $type))] | first | .body // empty' | \
-    awk '/<\/summary>/{found=1; next} /<\/details>/{found=0} found')
+  # Extract BOTH content and updated_at timestamp
+  SPEC_DATA=$(echo "$COMMENTS" | jq -r --arg type "$SPEC_TYPE" \
+    '[.[] | select(.body | test("REGENT_SPEC:" + $type))] | first | {body, updated_at} // {}')
+
+  UPDATED_AT=$(echo "$SPEC_DATA" | jq -r '.updated_at // empty')
+  BODY=$(echo "$SPEC_DATA" | jq -r '.body // empty')
+
+  CONTENT=$(echo "$BODY" | awk '/<\/summary>/{found=1; next} /<\/details>/{found=0} found')
 
   if [ -n "$CONTENT" ]; then
     echo "$CONTENT" > "$SPECS_DIR/$SPEC_TYPE.md"
     case "$SPEC_TYPE" in
-      brainstorm) FOUND_BRAINSTORM="true" ;;
-      requirements) FOUND_REQUIREMENTS="true" ;;
-      design) FOUND_DESIGN="true" ;;
+      brainstorm) FOUND_BRAINSTORM="true"; BRAINSTORM_UPDATED_AT="$UPDATED_AT" ;;
+      requirements) FOUND_REQUIREMENTS="true"; REQUIREMENTS_UPDATED_AT="$UPDATED_AT" ;;
+      design) FOUND_DESIGN="true"; DESIGN_UPDATED_AT="$UPDATED_AT" ;;
     esac
   fi
 done
+
+# Compute spec hash from timestamps (for validation during execute-issue)
+HASH_INPUT="brainstorm:${BRAINSTORM_UPDATED_AT:-}|design:${DESIGN_UPDATED_AT:-}|requirements:${REQUIREMENTS_UPDATED_AT:-}"
+if command -v shasum >/dev/null 2>&1; then
+  SPEC_HASH=$(echo -n "$HASH_INPUT" | shasum -a 256 | cut -c1-12)
+else
+  SPEC_HASH=$(echo -n "$HASH_INPUT" | sha256sum | cut -c1-12)
+fi
 
 # Validate required specs exist
 if [ -z "$FOUND_REQUIREMENTS" ]; then
@@ -91,4 +106,8 @@ CHILD_COUNT="$CHILD_COUNT"
 FOUND_BRAINSTORM="$FOUND_BRAINSTORM"
 FOUND_REQUIREMENTS="$FOUND_REQUIREMENTS"
 FOUND_DESIGN="$FOUND_DESIGN"
+BRAINSTORM_UPDATED_AT="$BRAINSTORM_UPDATED_AT"
+REQUIREMENTS_UPDATED_AT="$REQUIREMENTS_UPDATED_AT"
+DESIGN_UPDATED_AT="$DESIGN_UPDATED_AT"
+SPEC_HASH="$SPEC_HASH"
 EOF

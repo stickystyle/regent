@@ -64,6 +64,158 @@ Download specs from the parent Epic to ensure we have the latest version (overwr
    - Warn user: "Could not find parent Epic for spec '${SPEC_NAME}'. Specs are not available locally."
    - Ask user if they want to proceed anyway (the task may still be implementable from issue context alone)
 
+## Phase 1.6: Validate Spec Hash
+
+After downloading specs, validate they haven't changed since the issue was created. This ensures the task still aligns with the current spec documents.
+
+### Step 1: Extract stored hash from issue body
+
+Parse the hidden hash markers from the issue body (fetched in Phase 1):
+
+```bash
+STORED_HASH=$(echo "$ISSUE_BODY" | grep -o '<!-- REGENT_SPEC_HASH:[a-f0-9]\{12\} -->' | \
+  sed 's/<!-- REGENT_SPEC_HASH://;s/ -->//')
+STORED_TIMESTAMPS=$(echo "$ISSUE_BODY" | grep -o '<!-- REGENT_SPEC_TIMESTAMPS:[^>]*-->' | \
+  sed 's/<!-- REGENT_SPEC_TIMESTAMPS://;s/ -->//')
+```
+
+### Step 2: Handle missing hash (backward compatibility)
+
+If no hash is found, this is an older issue created before hash validation was implemented:
+
+```
+⚠️ No spec hash found in issue #{N}. Validation skipped.
+Consider re-running /regent:plan --epic ${EPIC_NUM} to recreate issues with hash validation.
+```
+
+Proceed to Phase 2.
+
+### Step 3: Compare hashes
+
+The current `SPEC_HASH` was set by `fetch-epic-specs.sh` in Phase 1.5.
+
+If `STORED_HASH` equals `SPEC_HASH`:
+```
+✓ Spec hash verified. Specs unchanged since issue creation.
+```
+Proceed to Phase 2.
+
+### Step 4: On mismatch - identify changes
+
+Parse `STORED_TIMESTAMPS` to identify which specs changed:
+
+```
+Format: brainstorm={ts},design={ts},requirements={ts}
+
+Compare each stored timestamp against current:
+- STORED_BRAINSTORM vs BRAINSTORM_UPDATED_AT
+- STORED_DESIGN vs DESIGN_UPDATED_AT
+- STORED_REQUIREMENTS vs REQUIREMENTS_UPDATED_AT
+```
+
+### Step 5: Report changes and auto-validate
+
+```
+⚠️ Spec documents have changed since issue #{N} was created.
+
+Changed specs:
+- {type}: {old_timestamp} → {new_timestamp}
+
+Running validation against updated specs...
+```
+
+Invoke validation using the Task tool:
+
+```
+subagent_type: "regent-spec-validator"
+description: "Validate task against updated specs"
+prompt: |
+  Validate whether this task is still valid given the updated spec documents.
+
+  ## Task Brief (from Issue #{N})
+
+  {paste the issue body}
+
+  ## Current Spec Documents
+
+  ### Requirements (updated: {REQUIREMENTS_UPDATED_AT})
+  {content from .regent/{spec-name}/requirements.md}
+
+  ### Design (updated: {DESIGN_UPDATED_AT})
+  {content from .regent/{spec-name}/design.md}
+
+  ## Your Task
+
+  Analyze whether this task is still valid given the updated specs. Look for:
+
+  1. **Obsolete functionality**: Does the task implement something no longer required?
+  2. **Missing functionality**: Do updated specs require additional work not in this task?
+  3. **Conflicts**: Does the task contradict any updated spec requirements or design?
+  4. **Scope changes**: Has the scope of this task changed based on updated specs?
+
+  ## Output Format
+
+  Provide your analysis with a clear recommendation:
+
+  **Recommendation**: PROCEED | UPDATE_TASK | ABORT
+
+  **Analysis**:
+  - {List specific issues or confirmations}
+
+  **If UPDATE_TASK**: Describe what changes are needed to the task.
+  **If ABORT**: Explain why the task should not proceed.
+```
+
+### Step 6: Present validation results and prompt
+
+```
+Spec Validation Complete
+
+Recommendation: {PROCEED/UPDATE_TASK/ABORT}
+
+{Summary from validator}
+```
+
+**If PROCEED:**
+```
+The task appears valid with updated specs. Proceed with execution? [y/n]
+```
+
+**If UPDATE_TASK:**
+```
+The validator recommends updating the task:
+{details}
+
+Options:
+1. Proceed anyway (not recommended)
+2. Abort and update the issue first
+3. Abort
+
+Choose [1/2/3]:
+```
+
+**If ABORT:**
+```
+The validator recommends aborting:
+{reason}
+
+Proceed anyway? (not recommended) [y/n]
+```
+
+### Step 7: Handle user decision
+
+- **User confirms proceed**: Continue to Phase 2 (Feature Branch Setup)
+- **User chooses abort**: Exit with guidance:
+
+```
+Execution aborted.
+
+Next steps:
+1. Review the spec changes in Epic #${EPIC_NUM}
+2. Update this issue if needed: gh issue edit {N} --body "..."
+3. Or re-run /regent:plan --epic ${EPIC_NUM} to regenerate tasks
+```
+
 ## Phase 2: Feature Branch Setup
 
 1. Ensure working directory is clean:
