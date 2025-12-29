@@ -30,12 +30,11 @@ Implement a task from a GitHub issue, working on a shared feature branch with a 
 
 3. If no `regent` label, warn user this may not be a Regent-managed issue
 
-4. Verify `.regent/{spec-name}/` exists locally
-   - If not, proceed to Phase 1.5 to download specs from Epic
+4. Proceed to Phase 1.5 to download latest specs from Epic
 
 ## Phase 1.5: Epic Detection and Spec Download
 
-If the local spec directory does not exist, attempt to download specs from the parent Epic.
+Download specs from the parent Epic to ensure we have the latest version (overwrites any stale local copies).
 
 1. **Get spec name from task issue labels:**
    ```bash
