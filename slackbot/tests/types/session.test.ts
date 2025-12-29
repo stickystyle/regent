@@ -47,12 +47,17 @@ describe("Session Type", () => {
       assertEquals(Phase.Finalized, "finalized");
     });
 
-    it("should only have three valid phases", () => {
+    it("should have four valid phases", () => {
       const phases = Object.values(Phase);
-      assertEquals(phases.length, 3);
+      assertEquals(phases.length, 4);
+      assertEquals(phases.includes(Phase.Initializing), true);
       assertEquals(phases.includes(Phase.Questioning), true);
       assertEquals(phases.includes(Phase.Review), true);
       assertEquals(phases.includes(Phase.Finalized), true);
+    });
+
+    it("should have initializing phase", () => {
+      assertEquals(Phase.Initializing, "initializing");
     });
   });
 

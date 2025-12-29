@@ -11,8 +11,6 @@ import type { DatastoreClient, DatastoreResponse } from "../../src/managers/data
 import { MockDatastoreClient } from "../../src/managers/datastore-client.ts";
 import { SessionManager } from "../../src/managers/session-manager.ts";
 import { SessionOrchestrator } from "../../src/orchestrators/session-orchestrator.ts";
-import type { RepositoryContext } from "../../src/types/repository-context.ts";
-import { Framework } from "../../src/types/repository-context.ts";
 import type { Session } from "../../src/types/session.ts";
 import type { SlashCommand } from "../../src/types/slash-command.ts";
 
@@ -23,8 +21,13 @@ describe("SessionOrchestrator", () => {
   let anthropicClient: MockAnthropicClient;
   let messagingClient: MockSlackMessagingClient;
   let datastore: MockDatastoreClient;
+  let originalCallbackUrl: string | undefined;
 
   beforeEach(() => {
+    // Save and set default callback URL for tests that expect exploration to trigger
+    originalCallbackUrl = Deno.env.get("EXPLORATION_CALLBACK_URL");
+    Deno.env.set("EXPLORATION_CALLBACK_URL", "https://example.com/callback");
+
     datastore = new MockDatastoreClient();
     sessionManager = new SessionManager(datastore);
     githubClient = new MockGitHubClient();
@@ -40,6 +43,13 @@ describe("SessionOrchestrator", () => {
   });
 
   afterEach(() => {
+    // Restore original callback URL
+    if (originalCallbackUrl !== undefined) {
+      Deno.env.set("EXPLORATION_CALLBACK_URL", originalCallbackUrl);
+    } else {
+      Deno.env.delete("EXPLORATION_CALLBACK_URL");
+    }
+
     datastore.clear();
     githubClient.clear();
     anthropicClient.clear();
@@ -126,28 +136,27 @@ describe("SessionOrchestrator", () => {
       });
     });
 
-    describe("repository exploration", () => {
-      it("should explore repository when --repo flag provided", async () => {
+    describe("repository exploration (async flow)", () => {
+      it("should trigger exploration workflow when --repo flag provided", async () => {
         const command = createSlashCommand({ repository: "owner/repo" });
         const threadTs = "1234567890.123456";
 
         await orchestrator.handleSlashCommand(command, threadTs);
 
-        // Verify GitHub client was called with correct owner/repo
-        const conversations = anthropicClient.getConversationHistory();
-        assertExists(conversations[0]);
-        assertExists(conversations[0].context);
-        assertEquals(conversations[0].context?.repository, "owner/repo");
+        // Verify GitHub client triggered exploration workflow
+        const calls = githubClient.getTriggerExplorationCalls();
+        assertEquals(calls.length, 1);
+        assertEquals(calls[0].targetRepo, "owner/repo");
       });
 
-      it("should post exploration status message before exploring", async () => {
+      it("should post exploration status message before triggering workflow", async () => {
         const command = createSlashCommand({ repository: "owner/repo" });
         const threadTs = "1234567890.123456";
 
         await orchestrator.handleSlashCommand(command, threadTs);
 
         const messages = messagingClient.getPostedMessages();
-        // Should have: acknowledgment, exploration status, exploration summary, first question
+        // Should have: acknowledgment, exploration status
         assertEquals(messages.length >= 2, true);
         // Second message should be exploration status
         const explorationMessage = messages.find((m) =>
@@ -157,45 +166,26 @@ describe("SessionOrchestrator", () => {
         assertExists(explorationMessage);
       });
 
-      it("should post exploration summary after exploring repository", async () => {
-        const mockContext: RepositoryContext = {
-          repository: "owner/repo",
-          framework: Framework.React,
-          patterns: ["Component pattern", "Hooks pattern"],
-          relevant_files: [{ path: "src/App.tsx", description: "Main app" }],
-          structure: "src/\n  components/\n  hooks/",
-        };
-        // Configure the mock to return specific context
-        githubClient.clear();
-        const configurableClient = new ConfigurableMockGitHubClient();
-        configurableClient.setExploreRepositoryResult(mockContext);
-
-        orchestrator = new SessionOrchestrator(
-          sessionManager,
-          configurableClient,
-          anthropicClient,
-          messagingClient,
-        );
-
+      it("should NOT call exploreRepository directly (async flow uses webhook)", async () => {
         const command = createSlashCommand({ repository: "owner/repo" });
         const threadTs = "1234567890.123456";
 
         await orchestrator.handleSlashCommand(command, threadTs);
 
-        const messages = messagingClient.getPostedMessages();
-        // Should have a message mentioning framework or patterns (case insensitive)
-        const summaryMessage = messages.find((m) =>
-          m.text.toLowerCase().includes("react") ||
-          m.text.toLowerCase().includes("framework")
-        );
-        assertExists(summaryMessage);
+        // Verify exploreRepository was NOT called directly
+        const exploreDirectCalls = githubClient.getExploreRepositoryCalls();
+        assertEquals(exploreDirectCalls.length, 0);
       });
 
-      it("should not explore repository when --repo flag not provided", async () => {
+      it("should not trigger exploration when --repo flag not provided", async () => {
         const command = createSlashCommand({ repository: undefined });
         const threadTs = "1234567890.123456";
 
         await orchestrator.handleSlashCommand(command, threadTs);
+
+        // Verify triggerExploration was NOT called
+        const calls = githubClient.getTriggerExplorationCalls();
+        assertEquals(calls.length, 0);
 
         // Verify Anthropic client was called without context
         const conversations = anthropicClient.getConversationHistory();
@@ -203,27 +193,19 @@ describe("SessionOrchestrator", () => {
         assertEquals(conversations[0].context, null);
       });
 
-      it("should parse owner and repo correctly from owner/repo string", async () => {
-        const configurableClient = new ConfigurableMockGitHubClient();
-        orchestrator = new SessionOrchestrator(
-          sessionManager,
-          configurableClient,
-          anthropicClient,
-          messagingClient,
-        );
-
+      it("should pass repository to triggerExploration", async () => {
         const command = createSlashCommand({ repository: "stickystyle/regent" });
         const threadTs = "1234567890.123456";
 
         await orchestrator.handleSlashCommand(command, threadTs);
 
-        // Verify the mock was called with correct owner and repo
-        assertEquals(configurableClient.lastExploreCall?.owner, "stickystyle");
-        assertEquals(configurableClient.lastExploreCall?.repo, "regent");
+        // Verify the mock was called with correct repository
+        const calls = githubClient.getTriggerExplorationCalls();
+        assertEquals(calls[0].targetRepo, "stickystyle/regent");
       });
     });
 
-    describe("first question generation", () => {
+    describe("first question generation (without repo)", () => {
       it("should generate first question after session creation", async () => {
         const command = createSlashCommand();
         const threadTs = "1234567890.123456";
@@ -258,16 +240,15 @@ describe("SessionOrchestrator", () => {
         assertEquals(questionMessage.threadTs, threadTs);
       });
 
-      it("should include repository context in first question generation when available", async () => {
+      it("should NOT generate first question when repo is provided (async flow)", async () => {
         const command = createSlashCommand({ repository: "owner/repo" });
         const threadTs = "1234567890.123456";
 
         await orchestrator.handleSlashCommand(command, threadTs);
 
+        // With repo, question generation happens via webhook callback, not immediately
         const conversations = anthropicClient.getConversationHistory();
-        assertExists(conversations[0]);
-        assertExists(conversations[0].context);
-        assertEquals(conversations[0].context?.repository, "owner/repo");
+        assertEquals(conversations.length, 0);
       });
 
       it("should include idea text in context for question generation", async () => {
@@ -284,14 +265,9 @@ describe("SessionOrchestrator", () => {
       });
     });
 
-    describe("error handling - access denied", () => {
-      it("should post error message when repository access is denied", async () => {
-        const accessError = new GitHubAccessError(
-          "Access denied",
-          "GitHub token lacks permissions",
-          "Update token permissions",
-        );
-        githubClient.setExploreRepositoryError(accessError);
+    describe("error handling - workflow trigger failure", () => {
+      it("should post error message when workflow trigger fails", async () => {
+        githubClient.setTriggerExplorationError(new Error("Workflow trigger failed"));
 
         const command = createSlashCommand({ repository: "private/repo" });
         const threadTs = "1234567890.123456";
@@ -300,20 +276,15 @@ describe("SessionOrchestrator", () => {
 
         const messages = messagingClient.getPostedMessages();
         const errorMessage = messages.find((m) =>
-          m.text.toLowerCase().includes("access") ||
-          m.text.toLowerCase().includes("permission") ||
-          m.text.toLowerCase().includes("denied")
+          m.text.toLowerCase().includes("error") ||
+          m.text.toLowerCase().includes("failed") ||
+          m.text.toLowerCase().includes("unable")
         );
         assertExists(errorMessage);
       });
 
-      it("should offer to continue without context when access denied", async () => {
-        const accessError = new GitHubAccessError(
-          "Access denied",
-          "GitHub token lacks permissions",
-          "Update token permissions",
-        );
-        githubClient.setExploreRepositoryError(accessError);
+      it("should offer to continue without context when workflow trigger fails", async () => {
+        githubClient.setTriggerExplorationError(new Error("Workflow trigger failed"));
 
         const command = createSlashCommand({ repository: "private/repo" });
         const threadTs = "1234567890.123456";
@@ -328,37 +299,8 @@ describe("SessionOrchestrator", () => {
         assertExists(continueMessage);
       });
 
-      it("should still generate first question after access denied error", async () => {
-        const accessError = new GitHubAccessError(
-          "Access denied",
-          "GitHub token lacks permissions",
-          "Update token permissions",
-        );
-        githubClient.setExploreRepositoryError(accessError);
-
-        const command = createSlashCommand({ repository: "private/repo" });
-        const threadTs = "1234567890.123456";
-
-        anthropicClient.setNextQuestionResponse({
-          question: "What problem are you solving?",
-          confidence_score: 20,
-        });
-
-        await orchestrator.handleSlashCommand(command, threadTs);
-
-        // Should still generate question without repository context
-        const conversations = anthropicClient.getConversationHistory();
-        assertEquals(conversations.length >= 1, true);
-        assertEquals(conversations[0].context, null);
-      });
-
-      it("should create session even when repository access fails", async () => {
-        const accessError = new GitHubAccessError(
-          "Access denied",
-          "GitHub token lacks permissions",
-          "Update token permissions",
-        );
-        githubClient.setExploreRepositoryError(accessError);
+      it("should create session even when workflow trigger fails", async () => {
+        githubClient.setTriggerExplorationError(new Error("Workflow trigger failed"));
 
         const command = createSlashCommand({ repository: "private/repo" });
         const threadTs = "1234567890.123456";
@@ -368,114 +310,50 @@ describe("SessionOrchestrator", () => {
         const session = await sessionManager.loadSession(command.channelId, threadTs);
         assertExists(session);
       });
-    });
 
-    describe("error handling - repo not found", () => {
-      it("should post error message when repository is not found", async () => {
-        const notFoundError = new GitHubAccessError(
-          "Repository not found",
-          "The repository does not exist or is not accessible",
-          "Verify the repository name and try again",
+      it("should handle GitHubAccessError during workflow trigger", async () => {
+        const accessError = new GitHubAccessError(
+          "Access denied",
+          "GitHub token lacks permissions for workflow dispatch",
+          "Update token permissions",
         );
-        githubClient.setExploreRepositoryError(notFoundError);
+        githubClient.setTriggerExplorationError(accessError);
 
-        const command = createSlashCommand({ repository: "nonexistent/repo" });
+        const command = createSlashCommand({ repository: "private/repo" });
         const threadTs = "1234567890.123456";
 
         await orchestrator.handleSlashCommand(command, threadTs);
 
         const messages = messagingClient.getPostedMessages();
         const errorMessage = messages.find((m) =>
-          m.text.toLowerCase().includes("not found") ||
-          m.text.toLowerCase().includes("doesn't exist") ||
-          m.text.toLowerCase().includes("could not")
+          m.text.toLowerCase().includes("access denied")
         );
         assertExists(errorMessage);
-      });
-
-      it("should offer to continue without context when repo not found", async () => {
-        const notFoundError = new GitHubAccessError(
-          "Repository not found",
-          "The repository does not exist",
-          "Verify the repository name",
-        );
-        githubClient.setExploreRepositoryError(notFoundError);
-
-        const command = createSlashCommand({ repository: "nonexistent/repo" });
-        const threadTs = "1234567890.123456";
-
-        await orchestrator.handleSlashCommand(command, threadTs);
-
-        const messages = messagingClient.getPostedMessages();
-        const continueMessage = messages.find((m) =>
-          m.text.toLowerCase().includes("continue") ||
-          m.text.toLowerCase().includes("without")
-        );
-        assertExists(continueMessage);
-      });
-
-      it("should still generate first question after repo not found error", async () => {
-        const notFoundError = new GitHubAccessError(
-          "Repository not found",
-          "The repository does not exist",
-          "Verify the repository name",
-        );
-        githubClient.setExploreRepositoryError(notFoundError);
-
-        const command = createSlashCommand({ repository: "nonexistent/repo" });
-        const threadTs = "1234567890.123456";
-
-        anthropicClient.setNextQuestionResponse({
-          question: "What is the goal of this feature?",
-          confidence_score: 20,
-        });
-
-        await orchestrator.handleSlashCommand(command, threadTs);
-
-        // Should still generate question without repository context
-        const conversations = anthropicClient.getConversationHistory();
-        assertEquals(conversations.length >= 1, true);
       });
     });
 
     describe("message ordering", () => {
-      it("should post messages in correct order: ack, exploration, summary, question", async () => {
-        const configurableClient = new ConfigurableMockGitHubClient();
-        const mockContext: RepositoryContext = {
-          repository: "owner/repo",
-          framework: Framework.NextJS,
-          patterns: [],
-          relevant_files: [],
-          structure: "",
-        };
-        configurableClient.setExploreRepositoryResult(mockContext);
-
-        orchestrator = new SessionOrchestrator(
-          sessionManager,
-          configurableClient,
-          anthropicClient,
-          messagingClient,
-        );
-
+      it("should post messages in correct order with repo: ack, exploring...", async () => {
         const command = createSlashCommand({ repository: "owner/repo" });
         const threadTs = "1234567890.123456";
-
-        anthropicClient.setNextQuestionResponse({
-          question: "What is the core problem?",
-          confidence_score: 20,
-        });
 
         await orchestrator.handleSlashCommand(command, threadTs);
 
         const messages = messagingClient.getPostedMessages();
-        // Should have at least 4 messages
-        assertEquals(messages.length >= 4, true);
+        // With repo (async flow): ack + exploring = 2 messages
+        assertEquals(messages.length, 2);
 
-        // First message should be acknowledgment (contains idea or brainstorm)
+        // First message should be acknowledgment
         assertEquals(
           messages[0].text.toLowerCase().includes("brainstorm") ||
-            messages[0].text.toLowerCase().includes("starting") ||
-            messages[0].text.toLowerCase().includes("idea"),
+            messages[0].text.toLowerCase().includes("starting"),
+          true,
+        );
+
+        // Second message should be "exploring codebase"
+        assertEquals(
+          messages[1].text.toLowerCase().includes("exploring") ||
+            messages[1].text.toLowerCase().includes("codebase"),
           true,
         );
       });
@@ -521,52 +399,24 @@ describe("SessionOrchestrator", () => {
       });
     });
 
-    describe("error handling - invalid repository format", () => {
-      it("should post error message for repository without slash", async () => {
+    describe("repository format handling (async flow)", () => {
+      // Note: Repository format validation now happens in the GHA workflow.
+      // Invalid formats are passed through to triggerExploration and errors are
+      // reported via the webhook callback.
+
+      it("should trigger exploration even with unusual repository format", async () => {
         const command = createSlashCommand({ repository: "invalidrepo" });
         const threadTs = "1234567890.123456";
 
         await orchestrator.handleSlashCommand(command, threadTs);
 
-        const messages = messagingClient.getPostedMessages();
-        const errorMessage = messages.find((m) =>
-          m.text.toLowerCase().includes("invalid repository format")
-        );
-        assertExists(errorMessage);
+        // Should still trigger exploration - validation happens in GHA workflow
+        const calls = githubClient.getTriggerExplorationCalls();
+        assertEquals(calls.length, 1);
+        assertEquals(calls[0].targetRepo, "invalidrepo");
       });
 
-      it("should offer to continue without context for invalid repository format", async () => {
-        const command = createSlashCommand({ repository: "invalidrepo" });
-        const threadTs = "1234567890.123456";
-
-        await orchestrator.handleSlashCommand(command, threadTs);
-
-        const messages = messagingClient.getPostedMessages();
-        const continueMessage = messages.find((m) =>
-          m.text.toLowerCase().includes("continue") &&
-          m.text.toLowerCase().includes("without")
-        );
-        assertExists(continueMessage);
-      });
-
-      it("should still generate first question after invalid repository format", async () => {
-        const command = createSlashCommand({ repository: "invalidrepo" });
-        const threadTs = "1234567890.123456";
-
-        anthropicClient.setNextQuestionResponse({
-          question: "What problem are you solving?",
-          confidence_score: 20,
-        });
-
-        await orchestrator.handleSlashCommand(command, threadTs);
-
-        // Should still generate question without repository context
-        const conversations = anthropicClient.getConversationHistory();
-        assertEquals(conversations.length >= 1, true);
-        assertEquals(conversations[0].context, null);
-      });
-
-      it("should create session even when repository format is invalid", async () => {
+      it("should create session even with unusual repository format", async () => {
         const command = createSlashCommand({ repository: "invalidrepo" });
         const threadTs = "1234567890.123456";
 
@@ -576,43 +426,15 @@ describe("SessionOrchestrator", () => {
         assertExists(session);
       });
 
-      it("should handle repository with empty owner gracefully", async () => {
-        const command = createSlashCommand({ repository: "/repo" });
-        const threadTs = "1234567890.123456";
-
-        await orchestrator.handleSlashCommand(command, threadTs);
-
-        const messages = messagingClient.getPostedMessages();
-        const errorMessage = messages.find((m) =>
-          m.text.toLowerCase().includes("invalid repository format")
-        );
-        assertExists(errorMessage);
-      });
-
-      it("should handle repository with empty repo name gracefully", async () => {
-        const command = createSlashCommand({ repository: "owner/" });
-        const threadTs = "1234567890.123456";
-
-        await orchestrator.handleSlashCommand(command, threadTs);
-
-        const messages = messagingClient.getPostedMessages();
-        const errorMessage = messages.find((m) =>
-          m.text.toLowerCase().includes("invalid repository format")
-        );
-        assertExists(errorMessage);
-      });
-
-      it("should handle repository with multiple slashes gracefully", async () => {
+      it("should pass repository format to GHA for validation", async () => {
         const command = createSlashCommand({ repository: "owner/repo/extra" });
         const threadTs = "1234567890.123456";
 
         await orchestrator.handleSlashCommand(command, threadTs);
 
-        const messages = messagingClient.getPostedMessages();
-        const errorMessage = messages.find((m) =>
-          m.text.toLowerCase().includes("invalid repository format")
-        );
-        assertExists(errorMessage);
+        // Repository format is passed through - GHA validates it
+        const calls = githubClient.getTriggerExplorationCalls();
+        assertEquals(calls[0].targetRepo, "owner/repo/extra");
       });
     });
 
@@ -677,28 +499,6 @@ describe("SessionOrchestrator", () => {
     });
   });
 });
-
-/**
- * Configurable mock GitHub client for testing exploration results.
- */
-class ConfigurableMockGitHubClient extends MockGitHubClient {
-  private exploreResult: RepositoryContext | null = null;
-  public lastExploreCall: { owner: string; repo: string } | null = null;
-
-  setExploreRepositoryResult(context: RepositoryContext): void {
-    this.exploreResult = context;
-  }
-
-  override exploreRepository(owner: string, repo: string): Promise<RepositoryContext> {
-    this.lastExploreCall = { owner, repo };
-
-    if (this.exploreResult) {
-      return Promise.resolve(this.exploreResult);
-    }
-
-    return super.exploreRepository(owner, repo);
-  }
-}
 
 /**
  * Mock datastore client that always fails on put operations.

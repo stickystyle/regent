@@ -21,8 +21,8 @@
     }
   },
   "tasks": {
-    "test": "deno test --allow-read --allow-net",
-    "test:coverage": "deno test --allow-read --allow-net --coverage=coverage && deno coverage coverage",
+    "test": "deno test --allow-read --allow-net --allow-env",
+    "test:coverage": "deno test --allow-read --allow-net --allow-env --coverage=coverage && deno coverage coverage",
     "check": "deno check **/*.ts",
     "fmt": "deno fmt",
     "lint": "deno lint"

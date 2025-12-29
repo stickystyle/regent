@@ -71,6 +71,7 @@ export class SessionManager {
    * @param threadTs - Slack thread timestamp
    * @param repo - GitHub repository in owner/repo format (empty string becomes undefined)
    * @param userId - Slack user ID of the initiator
+   * @param phase - Optional initial phase (defaults to Questioning)
    * @returns The created session
    * @throws Error if a session already exists for this channel and thread
    */
@@ -79,6 +80,7 @@ export class SessionManager {
     threadTs: string,
     repo: string,
     userId: string,
+    phase?: Phase,
   ): Promise<Session> {
     const sessionId = formatSessionId(channelId, threadTs);
 
@@ -96,7 +98,7 @@ export class SessionManager {
     const session: Session = {
       session_id: sessionId,
       repository: repo || undefined,
-      phase: Phase.Questioning,
+      phase: phase ?? Phase.Questioning,
       initiator_user_id: userId,
       confidence_score: 0,
       created_at: createdAt.toISOString(),

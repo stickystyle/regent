@@ -5,10 +5,13 @@
  * Phase enum representing the current state of a brainstorming session.
  *
  * Phases follow a linear progression:
- * questioning → review → finalized
+ * initializing → questioning → review → finalized
  */
 export enum Phase {
-  /** Initial phase where Claude asks questions and collects answers */
+  /** Initial phase while codebase exploration is in progress (async GHA workflow) */
+  Initializing = "initializing",
+
+  /** Phase where Claude asks questions and collects answers */
   Questioning = "questioning",
 
   /** Review phase where the team reviews the collected spec in a Canvas */

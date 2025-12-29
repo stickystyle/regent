@@ -138,6 +138,21 @@ export interface GitHubClient {
     commentId: number,
     body: string,
   ): Promise<GitHubComment>;
+
+  /**
+   * Trigger exploration workflow in regent-exploration-service via workflow_dispatch.
+   *
+   * @param targetRepo - Repository to explore in owner/repo format
+   * @param idea - The idea/feature being brainstormed
+   * @param callbackUrl - URL to POST results to
+   * @param sessionId - Session ID for correlation
+   */
+  triggerExploration(
+    targetRepo: string,
+    idea: string,
+    callbackUrl: string,
+    sessionId: string,
+  ): Promise<void>;
 }
 
 /**
@@ -155,9 +170,21 @@ export class MockGitHubClient implements GitHubClient {
   private getIssueCommentsError: Error | null = null;
   private createIssueCommentError: Error | null = null;
   private updateIssueCommentError: Error | null = null;
+  private triggerExplorationError: Error | null = null;
+  private triggerExplorationDelay = 0;
 
   private issueCounter = 0;
   private commentCounter = 0;
+  private triggerExplorationCalls: Array<{
+    targetRepo: string;
+    idea: string;
+    callbackUrl: string;
+    sessionId: string;
+  }> = [];
+  private exploreRepositoryCalls: Array<{
+    owner: string;
+    repo: string;
+  }> = [];
   private createdIssues: Array<{
     owner: string;
     repo: string;
@@ -260,6 +287,50 @@ export class MockGitHubClient implements GitHubClient {
   }
 
   /**
+   * Configure an error to be thrown by triggerExploration.
+   *
+   * @param error - Error to throw on next triggerExploration call
+   */
+  setTriggerExplorationError(error: Error): void {
+    this.triggerExplorationError = error;
+  }
+
+  /**
+   * Configure a delay for triggerExploration (for testing async behavior).
+   *
+   * @param delayMs - Delay in milliseconds
+   */
+  setTriggerExplorationDelay(delayMs: number): void {
+    this.triggerExplorationDelay = delayMs;
+  }
+
+  /**
+   * Get all triggerExploration calls made through this mock client.
+   *
+   * @returns Array of triggerExploration call records
+   */
+  getTriggerExplorationCalls(): Array<{
+    targetRepo: string;
+    idea: string;
+    callbackUrl: string;
+    sessionId: string;
+  }> {
+    return [...this.triggerExplorationCalls];
+  }
+
+  /**
+   * Get all exploreRepository calls made through this mock client.
+   *
+   * @returns Array of exploreRepository call records
+   */
+  getExploreRepositoryCalls(): Array<{
+    owner: string;
+    repo: string;
+  }> {
+    return [...this.exploreRepositoryCalls];
+  }
+
+  /**
    * Get all issues created through this mock client.
    *
    * @returns Array of created issue records
@@ -315,11 +386,15 @@ export class MockGitHubClient implements GitHubClient {
     this.getIssueCommentsError = null;
     this.createIssueCommentError = null;
     this.updateIssueCommentError = null;
+    this.triggerExplorationError = null;
+    this.triggerExplorationDelay = 0;
     this.issueCounter = 0;
     this.commentCounter = 0;
     this.createdIssues = [];
     this.createdComments = [];
     this.updatedComments = [];
+    this.triggerExplorationCalls = [];
+    this.exploreRepositoryCalls = [];
   }
 
   checkAccess(_owner: string, _repo: string): Promise<boolean> {
@@ -330,6 +405,9 @@ export class MockGitHubClient implements GitHubClient {
   }
 
   exploreRepository(owner: string, repo: string): Promise<RepositoryContext> {
+    // Record the call for test assertions
+    this.exploreRepositoryCalls.push({ owner, repo });
+
     if (this.exploreError !== null) {
       return Promise.reject(this.exploreError);
     }
@@ -341,6 +419,24 @@ export class MockGitHubClient implements GitHubClient {
       relevant_files: [],
       structure: "",
     });
+  }
+
+  triggerExploration(
+    targetRepo: string,
+    idea: string,
+    callbackUrl: string,
+    sessionId: string,
+  ): Promise<void> {
+    // Record the call for test assertions
+    this.triggerExplorationCalls.push({ targetRepo, idea, callbackUrl, sessionId });
+
+    if (this.triggerExplorationError !== null) {
+      return Promise.reject(this.triggerExplorationError);
+    }
+
+    // Always return immediately - the delay field is reserved for future use
+    // The actual workflow runs asynchronously after the API call returns
+    return Promise.resolve();
   }
 
   getDefaultBranch(_owner: string, _repo: string): Promise<string> {
@@ -1287,6 +1383,55 @@ export class GitHubClientImpl implements GitHubClient {
         },
         html_url: data.html_url as string,
       };
+    });
+  }
+
+  /**
+   * Trigger exploration workflow in regent-exploration-service via workflow_dispatch.
+   *
+   * Sends a workflow_dispatch event to the exploration service repository
+   * which will clone and analyze the target repository, then POST results
+   * to the callback URL.
+   *
+   * @param targetRepo - Repository to explore in owner/repo format
+   * @param idea - The idea/feature being brainstormed
+   * @param callbackUrl - URL to POST results to
+   * @param sessionId - Session ID for correlation
+   * @throws GitHubAccessError for authentication/permission errors
+   * @throws GitHubRateLimitError when rate limited
+   */
+  async triggerExploration(
+    targetRepo: string,
+    idea: string,
+    callbackUrl: string,
+    sessionId: string,
+  ): Promise<void> {
+    return await this.retryHandler.execute(async () => {
+      // The exploration service workflow is in the regent repository
+      const explorationOwner = "stickystyle";
+      const explorationRepo = "regent";
+      const workflowId = "explore-codebase.yml";
+
+      const url = `${this.baseUrl}/repos/${explorationOwner}/${explorationRepo}/actions/workflows/${workflowId}/dispatches`;
+
+      const response = await this.githubApi.post(
+        url,
+        {
+          ref: "main",
+          inputs: {
+            target_repo: targetRepo,
+            idea: idea,
+            callback_url: callbackUrl,
+            session_id: sessionId,
+          },
+        },
+        this.getHeaders(),
+      );
+
+      // workflow_dispatch returns 204 No Content on success
+      if (response.status !== 204) {
+        this.handleResponse(response);
+      }
     });
   }
 }

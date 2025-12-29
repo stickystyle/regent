@@ -257,6 +257,62 @@ describe("SessionOrchestrator.handleExplorationResult", () => {
       const messages = messagingClient.getPostedMessages();
       assertEquals(messages.length >= 1, true);
     });
+
+    it("should transition session to Questioning phase after exploration error", async () => {
+      const session = createValidSession();
+      session.phase = Phase.Initializing;
+      datastore.setSession(session);
+
+      const callback = createErrorCallback();
+
+      anthropicClient.setNextQuestionResponse({
+        question: "What problem are you trying to solve?",
+        confidence_score: 20,
+      });
+
+      await orchestrator.handleExplorationResult(callback);
+
+      const updatedSession = await datastore.getSession(sessionId);
+      assertExists(updatedSession);
+      assertEquals(updatedSession.phase, Phase.Questioning);
+    });
+
+    it("should generate first question after exploration error", async () => {
+      datastore.setSession(createValidSession());
+      const callback = createErrorCallback();
+
+      anthropicClient.setNextQuestionResponse({
+        question: "What is the core problem you want to solve?",
+        confidence_score: 20,
+      });
+
+      await orchestrator.handleExplorationResult(callback);
+
+      // Should have called Anthropic API to generate first question
+      const conversations = anthropicClient.getConversationHistory();
+      assertEquals(conversations.length >= 1, true);
+    });
+
+    it("should post first question to Slack after exploration error", async () => {
+      datastore.setSession(createValidSession());
+      const callback = createErrorCallback();
+
+      anthropicClient.setNextQuestionResponse({
+        question: "What is the core problem you want to solve?",
+        confidence_score: 20,
+      });
+
+      await orchestrator.handleExplorationResult(callback);
+
+      const messages = messagingClient.getPostedMessages();
+      // Should have error message + first question
+      assertEquals(messages.length >= 2, true);
+
+      const questionMessage = messages.find((m) =>
+        m.text.includes("core problem") || m.text.includes("solve")
+      );
+      assertExists(questionMessage);
+    });
   });
 
   describe("session not found handling", () => {
