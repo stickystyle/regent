@@ -13,118 +13,43 @@ Implement a task from a GitHub issue, working on a shared feature branch with a 
 /regent:execute-issue {issue-url}
 ```
 
-## Prerequisites
+## Phase 1: Initialization (Script-Based)
 
-1. Verify this is a Git repository with a GitHub remote
-2. Parse the issue number from the argument
-3. Fetch the issue and validate it has the `regent` label
-
-## Phase 1: Fetch Issue Context
-
-1. Get issue details:
-   ```bash
-   gh issue view {N} --json number,title,body,labels,comments
-   ```
-
-2. Parse the spec name from labels (find label matching `spec:*`)
-
-3. If no `regent` label, warn user this may not be a Regent-managed issue
-
-4. Proceed to Phase 1.5 to download latest specs from Epic
-
-## Phase 1.5: Epic Detection and Spec Download
-
-Download specs from the parent Epic to ensure we have the latest version (overwrites any stale local copies).
-
-1. **Get spec name from task issue labels:**
-   ```bash
-   SPEC_NAME=$(gh issue view {N} --json labels \
-     --jq '.labels[] | select(.name | startswith("spec:")) | .name | sub("spec:"; "")')
-   ```
-
-2. **Find parent Epic with same spec label:**
-   ```bash
-   EPIC=$(gh issue list --label "regent:epic" --label "spec:${SPEC_NAME}" \
-     --json number --jq '.[0].number')
-   ```
-
-3. **If Epic found, use the fetch script:**
-   ```bash
-   eval "$(plugin/scripts/fetch-epic-specs.sh ${EPIC})"
-   ```
-
-   This downloads all specs (brainstorm, requirements, design) in minimal API calls.
-
-   Report to user:
-   ```
-   Downloaded specs from Epic #${EPIC} to .regent/${SPEC_NAME}/
-   ```
-
-4. **If no Epic found:**
-   - Warn user: "Could not find parent Epic for spec '${SPEC_NAME}'. Specs are not available locally."
-   - Ask user if they want to proceed anyway (the task may still be implementable from issue context alone)
-
-## Phase 1.6: Validate Spec Hash
-
-After downloading specs, validate they haven't changed since the issue was created. This ensures the task still aligns with the current spec documents.
-
-### Step 1: Extract stored hash from issue body
-
-Parse the hidden hash markers from the issue body (fetched in Phase 1):
+Run the initialization script to handle all mechanical setup:
 
 ```bash
-STORED_HASH=$(echo "$ISSUE_BODY" | grep -o '<!-- REGENT_SPEC_HASH:[a-f0-9]\{12\} -->' | \
-  sed 's/<!-- REGENT_SPEC_HASH://;s/ -->//')
-STORED_TIMESTAMPS=$(echo "$ISSUE_BODY" | grep -o '<!-- REGENT_SPEC_TIMESTAMPS:[^>]*-->' | \
-  sed 's/<!-- REGENT_SPEC_TIMESTAMPS://;s/ -->//')
+plugin/scripts/init-execute-issue.sh {issue-number-or-url}
 ```
 
-### Step 2: Handle missing hash (backward compatibility)
+This script handles:
+- Fetching issue details (number, title, body, labels, comments)
+- Extracting spec name from labels
+- Finding and downloading specs from parent Epic
+- Validating spec hash
+- Git branch setup (stash if needed, fetch, checkout/create feature branch)
+- Creating `.regent/{spec-name}/briefs/` directory
 
-If no hash is found, this is an older issue created before hash validation was implemented:
+The script outputs structured data including:
+- `ISSUE_NUM`, `ISSUE_TITLE`, `ISSUE_BODY_FILE`, `COMMENTS_FILE`
+- `SPEC_NAME`, `SPEC_DIR`, `BRIEFS_DIR`, `EPIC_NUM`
+- `HASH_STATUS` (valid|missing|mismatch), `HASH_MESSAGE`
+- `BRANCH`, `BRANCH_ACTION` (created|switched|already_on), `STASHED`
 
-```
-⚠️ No spec hash found in issue #{N}. Validation skipped.
-Consider re-running /regent:plan --epic ${EPIC_NUM} to recreate issues with hash validation.
-```
-
-Proceed to Phase 2.
-
-### Step 3: Compare hashes
-
-The current `SPEC_HASH` was set by `fetch-epic-specs.sh` in Phase 1.5.
-
-If `STORED_HASH` equals `SPEC_HASH`:
-```
-✓ Spec hash verified. Specs unchanged since issue creation.
-```
-Proceed to Phase 2.
-
-### Step 4: On mismatch - identify changes
-
-Parse `STORED_TIMESTAMPS` to identify which specs changed:
+### Report initialization results to user:
 
 ```
-Format: brainstorm={ts},design={ts},requirements={ts}
+Task #{ISSUE_NUM}: {ISSUE_TITLE}
 
-Compare each stored timestamp against current:
-- STORED_BRAINSTORM vs BRAINSTORM_UPDATED_AT
-- STORED_DESIGN vs DESIGN_UPDATED_AT
-- STORED_REQUIREMENTS vs REQUIREMENTS_UPDATED_AT
+Specs: Downloaded from Epic #{EPIC_NUM} to {SPEC_DIR}/
+Branch: {BRANCH} ({BRANCH_ACTION})
+{if STASHED: "Stashed local changes"}
+
+Hash: {HASH_MESSAGE}
 ```
 
-### Step 5: Report changes and auto-validate
+### Handle hash mismatch (only case requiring Claude interaction)
 
-```
-⚠️ Spec documents have changed since issue #{N} was created.
-
-Changed specs:
-- {type}: {old_timestamp} → {new_timestamp}
-
-Running validation against updated specs...
-```
-
-Invoke validation using the Task tool:
+If `HASH_STATUS="mismatch"`, invoke validation:
 
 ```
 subagent_type: "regent-spec-validator"
@@ -134,15 +59,12 @@ prompt: |
 
   ## Task Brief (from Issue #{N})
 
-  {paste the issue body}
+  {read ISSUE_BODY_FILE}
 
   ## Current Spec Documents
 
-  ### Requirements (updated: {REQUIREMENTS_UPDATED_AT})
-  {content from .regent/{spec-name}/requirements.md}
-
-  ### Design (updated: {DESIGN_UPDATED_AT})
-  {content from .regent/{spec-name}/design.md}
+  {read SPEC_DIR/requirements.md}
+  {read SPEC_DIR/design.md}
 
   ## Your Task
 
@@ -155,99 +77,26 @@ prompt: |
 
   ## Output Format
 
-  Provide your analysis with a clear recommendation:
-
   **Recommendation**: PROCEED | UPDATE_TASK | ABORT
-
-  **Analysis**:
-  - {List specific issues or confirmations}
-
-  **If UPDATE_TASK**: Describe what changes are needed to the task.
-  **If ABORT**: Explain why the task should not proceed.
+  **Analysis**: {List specific issues or confirmations}
 ```
 
-### Step 6: Present validation results and prompt
+Based on recommendation:
+- **PROCEED**: Continue to Phase 2
+- **UPDATE_TASK**: Ask user to choose: proceed anyway, abort and update issue, or abort
+- **ABORT**: Ask user to confirm abort or proceed anyway (not recommended)
 
-```
-Spec Validation Complete
-
-Recommendation: {PROCEED/UPDATE_TASK/ABORT}
-
-{Summary from validator}
-```
-
-**If PROCEED:**
-```
-The task appears valid with updated specs. Proceed with execution? [y/n]
-```
-
-**If UPDATE_TASK:**
-```
-The validator recommends updating the task:
-{details}
-
-Options:
-1. Proceed anyway (not recommended)
-2. Abort and update the issue first
-3. Abort
-
-Choose [1/2/3]:
-```
-
-**If ABORT:**
-```
-The validator recommends aborting:
-{reason}
-
-Proceed anyway? (not recommended) [y/n]
-```
-
-### Step 7: Handle user decision
-
-- **User confirms proceed**: Continue to Phase 2 (Feature Branch Setup)
-- **User chooses abort**: Exit with guidance:
-
+If user aborts:
 ```
 Execution aborted.
 
 Next steps:
-1. Review the spec changes in Epic #${EPIC_NUM}
+1. Review the spec changes in Epic #{EPIC_NUM}
 2. Update this issue if needed: gh issue edit {N} --body "..."
 3. Or re-run /regent:plan --epic ${EPIC_NUM} to regenerate tasks
 ```
 
-## Phase 2: Feature Branch Setup
-
-1. Ensure working directory is clean:
-   ```bash
-   git status --porcelain
-   ```
-   - If dirty, ask user to commit or stash changes
-
-2. Fetch latest from remote:
-   ```bash
-   git fetch origin
-   ```
-
-3. Get the default branch name:
-   ```bash
-   gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'
-   ```
-
-4. Check if feature branch exists and set up accordingly:
-   ```bash
-   if git show-ref --verify --quiet refs/remotes/origin/feature/{spec-name}; then
-     # Feature branch exists - check it out and update
-     git checkout feature/{spec-name}
-     git pull origin feature/{spec-name}
-   else
-     # First task for this spec - create feature branch from default branch
-     git checkout -b feature/{spec-name} origin/{default-branch}
-     git push -u origin feature/{spec-name}
-   fi
-   ```
-
-## Phase 3: Explore Codebase (REQUIRED - Use Subagent)
+## Phase 2: Explore Codebase (REQUIRED - Use Subagent)
 
 **Important**: NOW we explore the codebase to get fresh, current references.
 
@@ -261,7 +110,7 @@ prompt: |
 
   ## Task Context (from GitHub Issue)
 
-  {paste the issue body here}
+  {read ISSUE_BODY_FILE}
 
   ## What to Find
 
@@ -314,13 +163,11 @@ prompt: |
   - [file path]: [why relevant]
 ```
 
-## Phase 4: Create Local Brief
+## Phase 3: Create Local Brief
 
 Combine the issue content with codebase exploration into a full task brief.
 
-1. Create briefs directory if needed: `.regent/{spec-name}/briefs/`
-
-2. Save to `.regent/{spec-name}/briefs/task-{N}.md`:
+Save to `{BRIEFS_DIR}/task-{N}.md`:
    ```markdown
    # Task Brief
 
@@ -346,13 +193,13 @@ Combine the issue content with codebase exploration into a full task brief.
    *Generated at execution time by Regent*
    ```
 
-3. Present the combined brief to the user
+Present the combined brief to the user.
 
 Ask: "Ready to proceed with Task {N}: {Title}?"
 
 Wait for confirmation before continuing.
 
-## Phase 5: Implementation (REQUIRED - Use Subagent)
+## Phase 4: Implementation (REQUIRED - Use Subagent)
 
 On confirmation, implement the task using specialized agents.
 
@@ -411,7 +258,7 @@ prompt: |
   Report what files were created/modified and the test results.
 ```
 
-## Phase 6: Code Review (REQUIRED - Use Subagent)
+## Phase 5: Code Review (REQUIRED - Use Subagent)
 
 After implementation, you MUST run the code-reviewer agent.
 
@@ -441,7 +288,7 @@ prompt: |
 ### Code Review Loop
 
 1. **Evaluate the review results**:
-   - If the review passes with no Critical Issues → proceed to Phase 7
+   - If the review passes with no Critical Issues → proceed to Phase 6
    - If issues identified → continue to step 2
 
 2. **Fix issues using the SAME implementation agent (Use Subagent)**:
@@ -450,7 +297,7 @@ prompt: |
    - Use the Task tool:
 
    ```
-   subagent_type: "{same-agent-as-phase-5}"
+   subagent_type: "{same-agent-as-phase-4}"
    description: "Fix review issues for task {N}"
    prompt: |
      Read `.regent/{spec-name}/briefs/task-{N}.md` for the original task context.
@@ -474,7 +321,7 @@ prompt: |
    - After fixes are applied, invoke `regent-code-reviewer` again (same syntax as above)
    - Repeat steps 1-3 until the review passes
 
-## Phase 7: Verification
+## Phase 6: Verification
 
 After code review passes:
 
@@ -488,7 +335,7 @@ If tests fail:
 - Re-run code review if changes were significant
 - Re-run tests
 
-## Phase 7.5: Human Review (REQUIRED)
+## Phase 6.5: Human Review (REQUIRED)
 
 **STOP HERE** - Do not proceed to commit until the user confirms.
 
@@ -506,14 +353,14 @@ Code review: Passed
 Ready to commit and close issue #{issue-number}?
 ```
 
-**Wait for user confirmation** before proceeding to Phase 8.
+**Wait for user confirmation** before proceeding to Phase 7.
 
 If the user requests changes:
-- Go back to Phase 5 (Implementation) with the requested modifications
-- Re-run code review (Phase 6) and verification (Phase 7)
+- Go back to Phase 4 (Implementation) with the requested modifications
+- Re-run code review (Phase 5) and verification (Phase 6)
 - Return here for another confirmation
 
-## Phase 8: Commit and Push
+## Phase 7: Commit and Push
 
 Once verified:
 
@@ -543,7 +390,7 @@ Once verified:
    The changes will be included in the spec's pull request."
    ```
 
-## Phase 9: Report Completion
+## Phase 8: Report Completion
 
 Report to user:
 ```
