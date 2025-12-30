@@ -96,7 +96,7 @@ Spawning worker Claude for issue #{N}...
 Execute the issue using a **fresh Claude instance**:
 
 ```bash
-ulimit -n 10240 && claude -p "/regent-execute-issue {issue_number} --auto-confirm" \
+claude -p "/regent-execute-issue {issue_number} --auto-confirm" \
   --plugin-dir . \
   --settings ".regent/worker-settings.json" \
   --dangerously-skip-permissions \
@@ -107,7 +107,6 @@ ulimit -n 10240 && claude -p "/regent-execute-issue {issue_number} --auto-confir
 ```
 
 **Flags explained:**
-- `ulimit -n 10240` - Raise file descriptor limit (prevents EMFILE errors from file watchers)
 - `-p` - Print mode (non-interactive)
 - `--plugin-dir .` - Load the regent plugin from current directory
 - `--settings` - Load worker-specific sandbox/permission settings (avoids modifying user's settings)
