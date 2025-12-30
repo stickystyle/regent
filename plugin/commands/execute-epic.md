@@ -117,11 +117,15 @@ ulimit -n 10240 && claude -p "/regent-execute-issue {issue_number} --auto-confir
 - `--no-session-persistence` - Workers are single-use, skip session file I/O
 - `--auto-confirm` - Flag to execute-issue to skip Phase 6.5 human confirmation
 
-**Wait for completion** - the Bash command blocks until the worker exits.
+**Run in background and poll for completion**:
+1. Execute the Bash command with `run_in_background: true` - this returns a task_id immediately
+2. Poll with `TaskOutput(task_id, block=true, timeout=600000)` in a loop until status is "completed"
+3. If TaskOutput times out (10 min max per call), call it again - the worker keeps running
+4. Workers may take 30+ minutes for complex tasks - keep polling until done
 
 ### Check Worker Result
 
-Parse the worker's exit status and output:
+Parse the worker's exit status and output from TaskOutput:
 
 ```bash
 WORKER_EXIT=$?
