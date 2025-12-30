@@ -70,6 +70,33 @@ eval "$EPIC_OUTPUT"
 # Create briefs directory
 mkdir -p "$BRIEFS_DIR"
 
+# Create worker settings file if it doesn't exist (shared across all epics)
+WORKER_SETTINGS_FILE=".regent/worker-settings.json"
+if [ ! -f "$WORKER_SETTINGS_FILE" ]; then
+  cat > "$WORKER_SETTINGS_FILE" <<'EOF'
+{
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "network": {
+      "allowedHosts": [
+        "github.com",
+        "api.github.com",
+        "raw.githubusercontent.com"
+      ]
+    }
+  },
+  "permissions": {
+    "deny": [
+      "Read(.env)",
+      "Read(**/*secret*)",
+      "Read(**/*credential*)"
+    ]
+  }
+}
+EOF
+fi
+
 # ============================================================================
 # PHASE 3: Fetch Sub-Issues (Ordered)
 # ============================================================================
@@ -242,6 +269,9 @@ TOTAL_ISSUES="$TOTAL_ISSUES"
 OPEN_ISSUES="$OPEN_ISSUES"
 CLOSED_ISSUES="$CLOSED_ISSUES"
 ISSUES_FILE="$ISSUES_FILE"
+
+## Worker Config
+WORKER_SETTINGS_FILE="$WORKER_SETTINGS_FILE"
 
 ## Progress
 PROGRESS_FILE="$PROGRESS_FILE"

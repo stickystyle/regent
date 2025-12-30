@@ -155,20 +155,25 @@ Spawning worker Claude for issue #{N}...
 Execute the issue using a **fresh Claude instance**:
 
 ```bash
-claude -p "/regent:execute-issue {issue_number} --auto-confirm" \
+ulimit -n 10240 && claude -p "/regent:execute-issue {issue_number} --auto-confirm" \
   --plugin-dir . \
+  --settings ".regent/worker-settings.json" \
   --dangerously-skip-permissions \
   --max-turns 30 \
   --output-format json \
+  --no-session-persistence \
   2>&1 | tee "{SPEC_DIR}/worker-{issue_number}.log"
 ```
 
 **Flags explained:**
+- `ulimit -n 10240` - Raise file descriptor limit (prevents EMFILE errors from file watchers)
 - `-p` - Print mode (non-interactive)
 - `--plugin-dir .` - Load the regent plugin from current directory
+- `--settings` - Load worker-specific sandbox/permission settings (avoids modifying user's settings)
 - `--dangerously-skip-permissions` - No permission prompts
 - `--max-turns 30` - Limit per-issue work (prevents runaway)
 - `--output-format json` - Structured output for parsing
+- `--no-session-persistence` - Workers are single-use, skip session file I/O
 - `--auto-confirm` - Flag to execute-issue to skip Phase 6.5 human confirmation
 
 **Wait for completion** - the Bash command blocks until the worker exits.
