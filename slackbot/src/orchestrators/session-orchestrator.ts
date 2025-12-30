@@ -5,10 +5,11 @@ import type { AnthropicClient } from "../clients/anthropic-client.ts";
 import type { GitHubClient } from "../clients/github-client.ts";
 import type { SlackMessagingClient } from "../clients/messaging-client.ts";
 import { BaseError, GitHubAccessError, ValidationError } from "../errors/types.ts";
+import type { CanvasManager } from "../managers/canvas-manager.ts";
 import type { MessageCache } from "../managers/message-cache.ts";
 import type { SessionManager } from "../managers/session-manager.ts";
 import type { Message } from "../types/message.ts";
-import type { RepositoryContext, RelevantFile } from "../types/repository-context.ts";
+import type { RelevantFile, RepositoryContext } from "../types/repository-context.ts";
 import { Framework } from "../types/repository-context.ts";
 import type { ExplorationContext } from "../types/exploration-callback.ts";
 import { formatSessionId, parseSessionId, Phase } from "../types/session.ts";
@@ -16,6 +17,7 @@ import type { Session } from "../types/session.ts";
 import type { SlashCommand } from "../types/slash-command.ts";
 import type { ExplorationCallback } from "../types/exploration-callback.ts";
 import { isExplorationSuccess } from "../types/exploration-callback.ts";
+import type { SpecDocument } from "../types/spec-document.ts";
 
 /**
  * Confidence threshold for transitioning from questioning to review phase.
@@ -40,6 +42,7 @@ export class SessionOrchestrator {
   private readonly messagingClient: SlackMessagingClient;
   private readonly messageCache: MessageCache | null;
   private readonly repositoryContextCache: Map<string, RepositoryContext>;
+  private readonly canvasManager: CanvasManager | null;
 
   /**
    * Create a new SessionOrchestrator.
@@ -49,6 +52,7 @@ export class SessionOrchestrator {
    * @param anthropicClient - Client for Claude question generation
    * @param messagingClient - Client for Slack message posting
    * @param messageCache - Optional message cache for conversation history
+   * @param canvasManager - Optional Canvas manager for spec display during review
    */
   constructor(
     sessionManager: SessionManager,
@@ -56,6 +60,7 @@ export class SessionOrchestrator {
     anthropicClient: AnthropicClient,
     messagingClient: SlackMessagingClient,
     messageCache?: MessageCache,
+    canvasManager?: CanvasManager,
   ) {
     this.sessionManager = sessionManager;
     this.githubClient = githubClient;
@@ -63,6 +68,7 @@ export class SessionOrchestrator {
     this.messagingClient = messagingClient;
     this.messageCache = messageCache ?? null;
     this.repositoryContextCache = new Map();
+    this.canvasManager = canvasManager ?? null;
   }
 
   /**
@@ -511,9 +517,9 @@ export class SessionOrchestrator {
       // Step 5: Update session confidence score
       session.confidence_score = response.confidence_score;
 
-      // Step 6: Check for phase transition
+      // Step 6: Check for phase transition to Review
       if (response.confidence_score >= REVIEW_PHASE_THRESHOLD) {
-        session.phase = Phase.Review;
+        await this.transitionToReviewPhase(session, channelId, threadTs);
       }
 
       // Persist session updates
@@ -841,5 +847,457 @@ export class SessionOrchestrator {
 
     // Generate and post first question without repository context
     await this.generateFirstQuestionFromCallback(session, channelId, threadTs, null);
+  }
+
+  /**
+   * Transition session from Questioning to Review phase.
+   *
+   * Flow:
+   * 1. Synthesize spec from conversation history
+   * 2. Create Canvas with spec content
+   * 3. Post review instructions
+   * 4. Update session phase and canvas_id
+   *
+   * @param session - The active session
+   * @param channelId - Slack channel ID
+   * @param threadTs - Thread timestamp
+   */
+  private async transitionToReviewPhase(
+    session: Session,
+    channelId: string,
+    threadTs: string,
+  ): Promise<void> {
+    // Get conversation history
+    const messages = this.messageCache?.get(session.session_id) ?? [];
+
+    try {
+      // Step 1: Synthesize spec from conversation
+      const spec = await this.anthropicClient.synthesizeSpec(messages);
+
+      // Step 2: Create Canvas with spec content
+      if (this.canvasManager) {
+        const canvasId = await this.canvasManager.createCanvas(
+          spec,
+          threadTs,
+          channelId,
+        );
+        session.canvas_id = canvasId;
+      }
+
+      // Step 3: Update session phase
+      session.phase = Phase.Review;
+
+      // Step 4: Post review instructions
+      await this.postReviewInstructions(channelId, threadTs);
+    } catch (error) {
+      // Handle synthesis/canvas errors gracefully
+      await this.postReviewTransitionError(channelId, threadTs, error);
+    }
+  }
+
+  /**
+   * Post review instructions message to Slack thread.
+   *
+   * Informs the user that the spec is ready for review and provides
+   * guidance on how to provide feedback or approve.
+   *
+   * @param channelId - Slack channel ID
+   * @param threadTs - Thread timestamp
+   */
+  private async postReviewInstructions(
+    channelId: string,
+    threadTs: string,
+  ): Promise<void> {
+    const message = [
+      "*Spec Ready for Review*",
+      "",
+      "I've synthesized your requirements into a specification document. " +
+      "Please review the Canvas above.",
+      "",
+      "To provide feedback, reply with your comments. " +
+      'When you\'re satisfied, say "approve" to finalize.',
+    ].join("\n");
+
+    await this.messagingClient.postMessage(channelId, threadTs, message);
+  }
+
+  /**
+   * Post error message when review transition fails.
+   *
+   * @param channelId - Slack channel ID
+   * @param threadTs - Thread timestamp
+   * @param error - The error that occurred
+   */
+  private async postReviewTransitionError(
+    channelId: string,
+    threadTs: string,
+    error: unknown,
+  ): Promise<void> {
+    let message: string;
+
+    if (error instanceof BaseError) {
+      message = `Unable to prepare the spec for review.\n\n${error.toSlackMessage()}`;
+    } else if (error instanceof Error) {
+      message = `Unable to prepare the spec for review.\n\n` +
+        `*Error:* ${error.message}\n\n` +
+        "Please try again or contact support if the issue persists.";
+    } else {
+      message = "Unable to prepare the spec for review due to an unexpected error.\n\n" +
+        "Please try again or contact support if the issue persists.";
+    }
+
+    await this.messagingClient.postMessage(channelId, threadTs, message);
+  }
+
+  /**
+   * Handle review feedback from a user.
+   *
+   * If the feedback is an approval, the spec is finalized.
+   * Otherwise, the spec is revised based on the feedback.
+   *
+   * @param session - The active session in Review phase
+   * @param feedbackText - The user's feedback text
+   * @param userId - Slack user ID of the feedback author
+   * @param messageTs - Slack message timestamp
+   */
+  async handleReviewFeedback(
+    session: Session,
+    feedbackText: string,
+    _userId: string,
+    _messageTs: string,
+  ): Promise<void> {
+    // Parse channel ID and thread timestamp from session ID
+    const [channelId, threadTs] = session.session_id.split(":");
+
+    try {
+      // Check if this is an approval
+      if (this.isApprovalIntent(feedbackText)) {
+        await this.handleApproval(session, channelId, threadTs);
+        return;
+      }
+
+      // Handle revision feedback
+      await this.handleRevisionFeedback(session, channelId, threadTs, feedbackText);
+    } catch (error) {
+      await this.postReviewFeedbackError(channelId, threadTs, error);
+    }
+  }
+
+  /**
+   * Check if the feedback text indicates approval intent.
+   *
+   * Uses word boundary matching and checks for negation words to avoid
+   * false positives like "I do NOT approve" being detected as approval.
+   * Note: "no" is excluded from the negation words list because substring
+   * matching would cause false positives with words like "know" or "innovation".
+   * Explicit rejections like "No, I don't approve" are handled by "don't".
+   *
+   * @param feedbackText - The user's feedback text
+   * @returns True if the user is approving the spec
+   */
+  private isApprovalIntent(feedbackText: string): boolean {
+    const normalizedText = feedbackText.toLowerCase();
+
+    // Negation words that would negate approval intent.
+    // Note: "no" is intentionally excluded because it causes false positives
+    // when matching substrings in words like "know", "innovation", etc.
+    const negationWords = ["not", "don't", "dont", "do not", "never", "n't"];
+
+    const approvalPhrases = [
+      "approve",
+      "approved",
+      "lgtm",
+      "looks good",
+      "ship it",
+    ];
+
+    // Check if any approval phrase is present
+    for (const phrase of approvalPhrases) {
+      const phraseIndex = normalizedText.indexOf(phrase);
+      if (phraseIndex === -1) {
+        continue;
+      }
+
+      // Check for negation words before the approval phrase
+      const textBeforePhrase = normalizedText.slice(0, phraseIndex);
+
+      // Check if any negation word appears in the 30 characters before the phrase
+      // This handles cases like "I do not approve" or "don't approve"
+      const recentContext = textBeforePhrase.slice(-30);
+      const hasNegation = negationWords.some((negation) =>
+        recentContext.includes(negation)
+      );
+
+      if (!hasNegation) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Handle approval of the spec.
+   *
+   * @param session - The active session
+   * @param channelId - Slack channel ID
+   * @param threadTs - Thread timestamp
+   */
+  private async handleApproval(
+    _session: Session,
+    channelId: string,
+    threadTs: string,
+  ): Promise<void> {
+    // Post approval confirmation
+    await this.messagingClient.postMessage(
+      channelId,
+      threadTs,
+      "Spec approved! Ready for finalization.",
+    );
+  }
+
+  /**
+   * Handle revision feedback for the spec.
+   *
+   * Flow:
+   * 1. Get current spec from Canvas
+   * 2. Call reviseSpec with feedback
+   * 3. Update Canvas with revised spec
+   * 4. Post confirmation
+   *
+   * @param session - The active session
+   * @param channelId - Slack channel ID
+   * @param threadTs - Thread timestamp
+   * @param feedback - The user's feedback text
+   */
+  private async handleRevisionFeedback(
+    session: Session,
+    channelId: string,
+    threadTs: string,
+    feedback: string,
+  ): Promise<void> {
+    // Check for canvas_id
+    if (!session.canvas_id) {
+      await this.messagingClient.postMessage(
+        channelId,
+        threadTs,
+        "Unable to process feedback: Canvas not found. " +
+          "The spec may need to be re-synthesized.",
+      );
+      return;
+    }
+
+    if (!this.canvasManager) {
+      await this.messagingClient.postMessage(
+        channelId,
+        threadTs,
+        "Unable to process feedback: Canvas manager not configured.",
+      );
+      return;
+    }
+
+    // Get current spec from Canvas
+    const currentContent = await this.canvasManager.getCanvasContent(session.canvas_id);
+
+    // Parse the current spec (simplified - assumes well-formed spec)
+    const currentSpec = this.parseSpecFromMarkdown(currentContent);
+
+    // Call reviseSpec with feedback
+    const revisedSpec = await this.anthropicClient.reviseSpec(currentSpec, feedback);
+
+    // Update Canvas with revised spec
+    await this.canvasManager.updateCanvas(session.canvas_id, revisedSpec);
+
+    // Post confirmation
+    await this.messagingClient.postMessage(
+      channelId,
+      threadTs,
+      "Spec updated based on your feedback. Please review the changes.",
+    );
+  }
+
+  /**
+   * Parse a SpecDocument from markdown content.
+   *
+   * This parser extracts all fields from the Canvas markdown format,
+   * which follows the Regent brainstorm.md format produced by toMarkdown().
+   *
+   * @param markdown - Markdown content from Canvas
+   * @returns Parsed SpecDocument
+   */
+  private parseSpecFromMarkdown(markdown: string): SpecDocument {
+    // Default empty spec
+    const spec: SpecDocument = {
+      title: "",
+      overview: "",
+      problem_statement: "",
+      goals: [],
+      non_goals: [],
+      personas: [],
+      use_cases: [],
+      technical_details: "",
+      open_questions: [],
+    };
+
+    // Extract title from first heading
+    const titleMatch = markdown.match(/^#\s+(.+)$/m);
+    if (titleMatch) {
+      spec.title = titleMatch[1];
+    }
+
+    // Extract overview section
+    const overviewMatch = markdown.match(/##\s+Overview\s*\n\n([\s\S]*?)(?=\n##|$)/i);
+    if (overviewMatch) {
+      spec.overview = overviewMatch[1].trim();
+    }
+
+    // Extract problem statement section
+    const problemMatch = markdown.match(/##\s+Problem\s+Statement\s*\n\n([\s\S]*?)(?=\n##|$)/i);
+    if (problemMatch) {
+      spec.problem_statement = problemMatch[1].trim();
+    }
+
+    // Extract goals from "### Goals" subsection
+    const goalsMatch = markdown.match(/###\s+Goals\s*\n\n([\s\S]*?)(?=\n###|\n##|$)/i);
+    if (goalsMatch) {
+      spec.goals = this.parseBulletList(goalsMatch[1]);
+    }
+
+    // Extract non-goals from "### Non-Goals" subsection
+    const nonGoalsMatch = markdown.match(/###\s+Non-Goals\s*\n\n([\s\S]*?)(?=\n###|\n##|$)/i);
+    if (nonGoalsMatch) {
+      spec.non_goals = this.parseBulletList(nonGoalsMatch[1]);
+    }
+
+    // Extract personas from "## User Personas" section
+    const personasMatch = markdown.match(/##\s+User\s+Personas\s*\n\n([\s\S]*?)(?=\n##(?!\s*#)|$)/i);
+    if (personasMatch) {
+      spec.personas = this.parsePersonas(personasMatch[1]);
+    }
+
+    // Extract use cases from "## Use Cases" section
+    const useCasesMatch = markdown.match(/##\s+Use\s+Cases\s*\n\n([\s\S]*?)(?=\n##(?!\s*#)|$)/i);
+    if (useCasesMatch) {
+      spec.use_cases = this.parseUseCases(useCasesMatch[1]);
+    }
+
+    // Extract technical details from "## Technical Details" section
+    const technicalMatch = markdown.match(/##\s+Technical\s+Details\s*\n\n([\s\S]*?)(?=\n##|$)/i);
+    if (technicalMatch) {
+      spec.technical_details = technicalMatch[1].trim();
+    }
+
+    // Extract open questions from "## Open Questions" section
+    const questionsMatch = markdown.match(/##\s+Open\s+Questions\s*\n\n([\s\S]*?)(?=\n##|$)/i);
+    if (questionsMatch) {
+      spec.open_questions = this.parseBulletList(questionsMatch[1]);
+    }
+
+    return spec;
+  }
+
+  /**
+   * Parse a bulleted list from markdown into an array of strings.
+   *
+   * @param content - Markdown content containing a bulleted list
+   * @returns Array of list items with leading "- " removed
+   */
+  private parseBulletList(content: string): string[] {
+    const lines = content.split("\n");
+    const items: string[] = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("- ")) {
+        items.push(trimmed.slice(2));
+      }
+    }
+
+    return items;
+  }
+
+  /**
+   * Parse personas from markdown into Persona objects.
+   *
+   * Expected format:
+   * ### Persona Name
+   *
+   * Description text...
+   *
+   * @param content - Markdown content containing persona subsections
+   * @returns Array of Persona objects
+   */
+  private parsePersonas(
+    content: string,
+  ): Array<{ name: string; description: string }> {
+    const personas: Array<{ name: string; description: string }> = [];
+    const personaRegex = /###\s+(.+?)\s*\n\n([\s\S]*?)(?=\n###|$)/g;
+
+    let match;
+    while ((match = personaRegex.exec(content)) !== null) {
+      personas.push({
+        name: match[1].trim(),
+        description: match[2].trim(),
+      });
+    }
+
+    return personas;
+  }
+
+  /**
+   * Parse use cases from markdown into UseCase objects.
+   *
+   * Expected format:
+   * ### UC1: Use Case Title
+   *
+   * Description text...
+   *
+   * @param content - Markdown content containing use case subsections
+   * @returns Array of UseCase objects
+   */
+  private parseUseCases(
+    content: string,
+  ): Array<{ id: string; title: string; description: string }> {
+    const useCases: Array<{ id: string; title: string; description: string }> = [];
+    const useCaseRegex = /###\s+(\w+):\s+(.+?)\s*\n\n([\s\S]*?)(?=\n###|$)/g;
+
+    let match;
+    while ((match = useCaseRegex.exec(content)) !== null) {
+      useCases.push({
+        id: match[1].trim(),
+        title: match[2].trim(),
+        description: match[3].trim(),
+      });
+    }
+
+    return useCases;
+  }
+
+  /**
+   * Post error message when review feedback processing fails.
+   *
+   * @param channelId - Slack channel ID
+   * @param threadTs - Thread timestamp
+   * @param error - The error that occurred
+   */
+  private async postReviewFeedbackError(
+    channelId: string,
+    threadTs: string,
+    error: unknown,
+  ): Promise<void> {
+    let message: string;
+
+    if (error instanceof BaseError) {
+      message = `Unable to process your feedback.\n\n${error.toSlackMessage()}`;
+    } else if (error instanceof Error) {
+      message = `Unable to process your feedback.\n\n` +
+        `*Error:* ${error.message}\n\n` +
+        "Please try again or contact support if the issue persists.";
+    } else {
+      message = "Unable to process your feedback due to an unexpected error.\n\n" +
+        "Please try again or contact support if the issue persists.";
+    }
+
+    await this.messagingClient.postMessage(channelId, threadTs, message);
   }
 }
