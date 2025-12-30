@@ -9,9 +9,9 @@ Autonomous serial execution of all tasks in a GitHub epic. Designed for overnigh
 ## Usage
 
 ```
-/regent:execute-epic {epic-number}
-/regent:execute-epic {epic-url}
-/regent:execute-epic {epic-number} --dry-run
+/regent-execute-epic {epic-number}
+/regent-execute-epic {epic-url}
+/regent-execute-epic {epic-number} --dry-run
 ```
 
 ## Phase 0: Initialization
@@ -96,7 +96,7 @@ Spawning worker Claude for issue #{N}...
 Execute the issue using a **fresh Claude instance**:
 
 ```bash
-ulimit -n 10240 && claude -p "/regent:execute-issue {issue_number} --auto-confirm" \
+ulimit -n 10240 && claude -p "/regent-execute-issue {issue_number} --auto-confirm" \
   --plugin-dir . \
   --settings ".regent/worker-settings.json" \
   --dangerously-skip-permissions \
@@ -174,7 +174,7 @@ Report:
 
 ## Note: execute-issue --auto-confirm Flag
 
-The `/execute-issue` command needs a `--auto-confirm` flag that:
+The `/regent-execute-issue` command needs a `--auto-confirm` flag that:
 - Skips Phase 6.5 (Human Review)
 - Proceeds directly from verification to commit
 - Used only when spawned by execute-epic
@@ -259,7 +259,7 @@ Execution stopped at Issue #{N} (phase: {phase})
 Error: {error_message}
 
 To resume after fixing:
-  /execute-epic {EPIC_NUM}
+  /regent-execute-epic {EPIC_NUM}
 
 The command will automatically resume from Issue #{N}.
 ```
@@ -293,14 +293,14 @@ For fully autonomous execution:
 1. **GitHub CLI**: Authenticated with `gh auth login`
 2. **Claude CLI flags**:
    ```bash
-   claude -p "/execute-epic 42" \
+   claude -p "/regent-execute-epic 42" \
      --dangerously-skip-permissions \
      --max-turns 100
    ```
 
 ## If Unclear
 
-Unlike `/execute-issue`, this command does NOT stop to ask questions. If something is ambiguous:
+Unlike `/regent-execute-issue`, this command does NOT stop to ask questions. If something is ambiguous:
 - Make reasonable assumptions based on existing patterns
 - Document assumptions in commit messages
 - If truly blocked, fail and preserve state for manual intervention
