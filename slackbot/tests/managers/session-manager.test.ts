@@ -554,6 +554,514 @@ describe("SessionManager", () => {
     });
   });
 
+  describe("Property 1: Session Isolation", () => {
+    it("should create sessions with unique IDs in different channels", async () => {
+      // Arrange - Same thread timestamp, different channels
+      const threadTs = "1234567890.123456";
+      const channel1 = "C1111111111";
+      const channel2 = "C2222222222";
+      const channel3 = "C3333333333";
+      const userId = "U1234567890";
+
+      // Act - Create sessions in different channels
+      const session1 = await sessionManager.createSession(
+        channel1,
+        threadTs,
+        "owner/repo",
+        userId,
+      );
+      const session2 = await sessionManager.createSession(
+        channel2,
+        threadTs,
+        "owner/repo",
+        userId,
+      );
+      const session3 = await sessionManager.createSession(
+        channel3,
+        threadTs,
+        "owner/repo",
+        userId,
+      );
+
+      // Assert - All session IDs are unique
+      assertEquals(session1.session_id, `${channel1}:${threadTs}`);
+      assertEquals(session2.session_id, `${channel2}:${threadTs}`);
+      assertEquals(session3.session_id, `${channel3}:${threadTs}`);
+      assertEquals(session1.session_id !== session2.session_id, true);
+      assertEquals(session2.session_id !== session3.session_id, true);
+      assertEquals(session1.session_id !== session3.session_id, true);
+    });
+
+    it("should create sessions with unique IDs in different threads within same channel", async () => {
+      // Arrange - Same channel, different thread timestamps
+      const channelId = "C1234567890";
+      const thread1 = "1111111111.111111";
+      const thread2 = "2222222222.222222";
+      const thread3 = "3333333333.333333";
+      const userId = "U1234567890";
+
+      // Act - Create sessions in different threads
+      const session1 = await sessionManager.createSession(
+        channelId,
+        thread1,
+        "owner/repo",
+        userId,
+      );
+      const session2 = await sessionManager.createSession(
+        channelId,
+        thread2,
+        "owner/repo",
+        userId,
+      );
+      const session3 = await sessionManager.createSession(
+        channelId,
+        thread3,
+        "owner/repo",
+        userId,
+      );
+
+      // Assert - All session IDs are unique
+      assertEquals(session1.session_id, `${channelId}:${thread1}`);
+      assertEquals(session2.session_id, `${channelId}:${thread2}`);
+      assertEquals(session3.session_id, `${channelId}:${thread3}`);
+      assertEquals(session1.session_id !== session2.session_id, true);
+      assertEquals(session2.session_id !== session3.session_id, true);
+      assertEquals(session1.session_id !== session3.session_id, true);
+    });
+
+    it("should guarantee uniqueness via composite key channel_id:thread_ts", async () => {
+      // Arrange - Various combinations of channels and threads
+      const userId = "U1234567890";
+      const testCases = [
+        { channel: "C1111111111", thread: "1111111111.111111" },
+        { channel: "C1111111111", thread: "2222222222.222222" },
+        { channel: "C2222222222", thread: "1111111111.111111" },
+        { channel: "C2222222222", thread: "2222222222.222222" },
+      ];
+
+      // Act - Create all sessions
+      const sessions = [];
+      for (const { channel, thread } of testCases) {
+        const session = await sessionManager.createSession(
+          channel,
+          thread,
+          "owner/repo",
+          userId,
+        );
+        sessions.push(session);
+      }
+
+      // Assert - All session IDs are unique
+      const sessionIds = sessions.map((s) => s.session_id);
+      const uniqueIds = new Set(sessionIds);
+      assertEquals(uniqueIds.size, sessionIds.length);
+
+      // Verify expected format
+      for (let i = 0; i < testCases.length; i++) {
+        const expectedId =
+          `${testCases[i].channel}:${testCases[i].thread}`;
+        assertEquals(sessions[i].session_id, expectedId);
+      }
+    });
+
+    it("should isolate phase state between concurrent sessions", async () => {
+      // Arrange - Create two sessions
+      const session1 = await sessionManager.createSession(
+        "C1111111111",
+        "1111111111.111111",
+        "owner/repo1",
+        "U1111111111",
+      );
+      // Create session2 to verify isolation - we only need to modify session1
+      await sessionManager.createSession(
+        "C2222222222",
+        "2222222222.222222",
+        "owner/repo2",
+        "U2222222222",
+      );
+
+      // Act - Update phase of session1 only
+      session1.phase = Phase.Review;
+      await sessionManager.updateSession(session1);
+
+      // Assert - Session2 phase is unchanged
+      const loadedSession1 = await sessionManager.loadSession(
+        "C1111111111",
+        "1111111111.111111",
+      );
+      const loadedSession2 = await sessionManager.loadSession(
+        "C2222222222",
+        "2222222222.222222",
+      );
+
+      assertEquals(loadedSession1!.phase, Phase.Review);
+      assertEquals(loadedSession2!.phase, Phase.Questioning);
+    });
+
+    it("should isolate confidence_score state between concurrent sessions", async () => {
+      // Arrange - Create two sessions
+      const session1 = await sessionManager.createSession(
+        "C1111111111",
+        "1111111111.111111",
+        "owner/repo1",
+        "U1111111111",
+      );
+      // Create session2 to verify isolation - we only need to modify session1
+      await sessionManager.createSession(
+        "C2222222222",
+        "2222222222.222222",
+        "owner/repo2",
+        "U2222222222",
+      );
+
+      // Act - Update confidence_score of session1 only
+      session1.confidence_score = 75;
+      await sessionManager.updateSession(session1);
+
+      // Assert - Session2 confidence_score is unchanged
+      const loadedSession1 = await sessionManager.loadSession(
+        "C1111111111",
+        "1111111111.111111",
+      );
+      const loadedSession2 = await sessionManager.loadSession(
+        "C2222222222",
+        "2222222222.222222",
+      );
+
+      assertEquals(loadedSession1!.confidence_score, 75);
+      assertEquals(loadedSession2!.confidence_score, 0);
+    });
+
+    it("should isolate canvas_id state between concurrent sessions", async () => {
+      // Arrange - Create two sessions
+      const session1 = await sessionManager.createSession(
+        "C1111111111",
+        "1111111111.111111",
+        "owner/repo1",
+        "U1111111111",
+      );
+      // Create session2 to verify isolation - we only need to modify session1
+      await sessionManager.createSession(
+        "C2222222222",
+        "2222222222.222222",
+        "owner/repo2",
+        "U2222222222",
+      );
+
+      // Act - Set canvas_id on session1 only
+      session1.canvas_id = "F1234567890";
+      await sessionManager.updateSession(session1);
+
+      // Assert - Session2 canvas_id is unchanged
+      const loadedSession1 = await sessionManager.loadSession(
+        "C1111111111",
+        "1111111111.111111",
+      );
+      const loadedSession2 = await sessionManager.loadSession(
+        "C2222222222",
+        "2222222222.222222",
+      );
+
+      assertEquals(loadedSession1!.canvas_id, "F1234567890");
+      assertEquals(loadedSession2!.canvas_id, undefined);
+    });
+
+    it("should isolate epic fields between concurrent sessions", async () => {
+      // Arrange - Create two sessions
+      const session1 = await sessionManager.createSession(
+        "C1111111111",
+        "1111111111.111111",
+        "owner/repo1",
+        "U1111111111",
+      );
+      // Create session2 to verify isolation - we only need to modify session1
+      await sessionManager.createSession(
+        "C2222222222",
+        "2222222222.222222",
+        "owner/repo2",
+        "U2222222222",
+      );
+
+      // Act - Set epic fields on session1 only
+      session1.phase = Phase.Finalized;
+      session1.epic_number = 42;
+      session1.epic_url = "https://github.com/owner/repo1/issues/42";
+      session1.spec_comment_ids = { brainstorm: 100, requirements: 101 };
+      await sessionManager.updateSession(session1);
+
+      // Assert - Session2 epic fields are unchanged
+      const loadedSession1 = await sessionManager.loadSession(
+        "C1111111111",
+        "1111111111.111111",
+      );
+      const loadedSession2 = await sessionManager.loadSession(
+        "C2222222222",
+        "2222222222.222222",
+      );
+
+      assertEquals(loadedSession1!.epic_number, 42);
+      assertEquals(loadedSession1!.epic_url, "https://github.com/owner/repo1/issues/42");
+      assertEquals(loadedSession1!.spec_comment_ids?.brainstorm, 100);
+      assertEquals(loadedSession1!.spec_comment_ids?.requirements, 101);
+
+      assertEquals(loadedSession2!.epic_number, undefined);
+      assertEquals(loadedSession2!.epic_url, undefined);
+      assertEquals(loadedSession2!.spec_comment_ids, undefined);
+    });
+
+    it("should handle interleaved updates to multiple sessions without cross-contamination", async () => {
+      // Arrange - Create three concurrent sessions
+      const session1 = await sessionManager.createSession(
+        "C1111111111",
+        "1111111111.111111",
+        "owner/repo1",
+        "U1111111111",
+      );
+      const session2 = await sessionManager.createSession(
+        "C2222222222",
+        "2222222222.222222",
+        "owner/repo2",
+        "U2222222222",
+      );
+      const session3 = await sessionManager.createSession(
+        "C3333333333",
+        "3333333333.333333",
+        "owner/repo3",
+        "U3333333333",
+      );
+
+      // Act - Interleaved updates to simulate concurrent usage
+      session1.confidence_score = 25;
+      await sessionManager.updateSession(session1);
+
+      session2.phase = Phase.Review;
+      session2.canvas_id = "F2222222222";
+      await sessionManager.updateSession(session2);
+
+      session1.confidence_score = 50;
+      await sessionManager.updateSession(session1);
+
+      session3.phase = Phase.Finalized;
+      session3.epic_number = 99;
+      await sessionManager.updateSession(session3);
+
+      session1.phase = Phase.Review;
+      session1.confidence_score = 75;
+      await sessionManager.updateSession(session1);
+
+      session2.confidence_score = 95;
+      await sessionManager.updateSession(session2);
+
+      // Assert - Each session has only its own state, no cross-contamination
+      const loaded1 = await sessionManager.loadSession(
+        "C1111111111",
+        "1111111111.111111",
+      );
+      const loaded2 = await sessionManager.loadSession(
+        "C2222222222",
+        "2222222222.222222",
+      );
+      const loaded3 = await sessionManager.loadSession(
+        "C3333333333",
+        "3333333333.333333",
+      );
+
+      // Session 1 assertions
+      assertEquals(loaded1!.phase, Phase.Review);
+      assertEquals(loaded1!.confidence_score, 75);
+      assertEquals(loaded1!.canvas_id, undefined);
+      assertEquals(loaded1!.epic_number, undefined);
+      assertEquals(loaded1!.repository, "owner/repo1");
+
+      // Session 2 assertions
+      assertEquals(loaded2!.phase, Phase.Review);
+      assertEquals(loaded2!.confidence_score, 95);
+      assertEquals(loaded2!.canvas_id, "F2222222222");
+      assertEquals(loaded2!.epic_number, undefined);
+      assertEquals(loaded2!.repository, "owner/repo2");
+
+      // Session 3 assertions
+      assertEquals(loaded3!.phase, Phase.Finalized);
+      assertEquals(loaded3!.confidence_score, 0);
+      assertEquals(loaded3!.canvas_id, undefined);
+      assertEquals(loaded3!.epic_number, 99);
+      assertEquals(loaded3!.repository, "owner/repo3");
+    });
+
+    it("should correctly identify sessions using channel ID and thread timestamp", async () => {
+      // Arrange - Create sessions with specific channel/thread combinations
+      const session1 = await sessionManager.createSession(
+        "C1234567890",
+        "1111111111.111111",
+        "owner/repo",
+        "U1234567890",
+      );
+      const session2 = await sessionManager.createSession(
+        "C1234567890",
+        "2222222222.222222",
+        "owner/repo",
+        "U1234567890",
+      );
+      const session3 = await sessionManager.createSession(
+        "C9876543210",
+        "1111111111.111111",
+        "owner/repo",
+        "U1234567890",
+      );
+
+      // Update each session differently
+      session1.confidence_score = 10;
+      session2.confidence_score = 20;
+      session3.confidence_score = 30;
+      await sessionManager.updateSession(session1);
+      await sessionManager.updateSession(session2);
+      await sessionManager.updateSession(session3);
+
+      // Act - Load sessions by their specific channel/thread combinations
+      const loaded1 = await sessionManager.loadSession(
+        "C1234567890",
+        "1111111111.111111",
+      );
+      const loaded2 = await sessionManager.loadSession(
+        "C1234567890",
+        "2222222222.222222",
+      );
+      const loaded3 = await sessionManager.loadSession(
+        "C9876543210",
+        "1111111111.111111",
+      );
+
+      // Assert - Each load returns the correct session
+      assertEquals(loaded1!.confidence_score, 10);
+      assertEquals(loaded2!.confidence_score, 20);
+      assertEquals(loaded3!.confidence_score, 30);
+
+      // Verify session IDs match expected composite keys
+      assertEquals(loaded1!.session_id, "C1234567890:1111111111.111111");
+      assertEquals(loaded2!.session_id, "C1234567890:2222222222.222222");
+      assertEquals(loaded3!.session_id, "C9876543210:1111111111.111111");
+    });
+
+    it("should preserve independent initiator_user_id for each session", async () => {
+      // Arrange - Create sessions with different initiators
+      await sessionManager.createSession(
+        "C1111111111",
+        "1111111111.111111",
+        "owner/repo",
+        "U1111111111",
+      );
+      await sessionManager.createSession(
+        "C2222222222",
+        "2222222222.222222",
+        "owner/repo",
+        "U2222222222",
+      );
+      await sessionManager.createSession(
+        "C3333333333",
+        "3333333333.333333",
+        "owner/repo",
+        "U3333333333",
+      );
+
+      // Act - Load all sessions
+      const loaded1 = await sessionManager.loadSession(
+        "C1111111111",
+        "1111111111.111111",
+      );
+      const loaded2 = await sessionManager.loadSession(
+        "C2222222222",
+        "2222222222.222222",
+      );
+      const loaded3 = await sessionManager.loadSession(
+        "C3333333333",
+        "3333333333.333333",
+      );
+
+      // Assert - Each session has its own initiator
+      assertEquals(loaded1!.initiator_user_id, "U1111111111");
+      assertEquals(loaded2!.initiator_user_id, "U2222222222");
+      assertEquals(loaded3!.initiator_user_id, "U3333333333");
+    });
+
+    it("should preserve independent repository for each session", async () => {
+      // Arrange - Create sessions with different repositories
+      await sessionManager.createSession(
+        "C1111111111",
+        "1111111111.111111",
+        "org1/repo1",
+        "U1234567890",
+      );
+      await sessionManager.createSession(
+        "C2222222222",
+        "2222222222.222222",
+        "org2/repo2",
+        "U1234567890",
+      );
+      await sessionManager.createSession(
+        "C3333333333",
+        "3333333333.333333",
+        "", // No repository
+        "U1234567890",
+      );
+
+      // Act - Load all sessions
+      const loaded1 = await sessionManager.loadSession(
+        "C1111111111",
+        "1111111111.111111",
+      );
+      const loaded2 = await sessionManager.loadSession(
+        "C2222222222",
+        "2222222222.222222",
+      );
+      const loaded3 = await sessionManager.loadSession(
+        "C3333333333",
+        "3333333333.333333",
+      );
+
+      // Assert - Each session has its own repository
+      assertEquals(loaded1!.repository, "org1/repo1");
+      assertEquals(loaded2!.repository, "org2/repo2");
+      assertEquals(loaded3!.repository, undefined);
+    });
+
+    it("should preserve independent TTL for each session", async () => {
+      // Arrange - Create sessions at different times
+      const time1 = new Date("2025-01-01T00:00:00.000Z");
+      const time2 = new Date("2025-01-15T00:00:00.000Z");
+
+      const datastore1 = new MockDatastoreClient(time1);
+      const manager1 = new SessionManager(datastore1, () => time1);
+
+      const session1 = await manager1.createSession(
+        "C1111111111",
+        "1111111111.111111",
+        "owner/repo",
+        "U1234567890",
+      );
+
+      // Create second session 14 days later using same datastore
+      datastore1.setCurrentTime(time2);
+      const manager2 = new SessionManager(datastore1, () => time2);
+
+      const session2 = await manager2.createSession(
+        "C2222222222",
+        "2222222222.222222",
+        "owner/repo",
+        "U1234567890",
+      );
+
+      // Assert - TTLs are 30 days from their respective creation times
+      const ttl1 = new Date(session1.ttl);
+      const ttl2 = new Date(session2.ttl);
+
+      assertEquals(ttl1.toISOString(), "2025-01-31T00:00:00.000Z");
+      assertEquals(ttl2.toISOString(), "2025-02-14T00:00:00.000Z");
+
+      // Verify TTLs are different
+      assertEquals(ttl1.getTime() !== ttl2.getTime(), true);
+    });
+  });
+
   describe("rebuildFromHistory", () => {
     let slackClient: MockSlackClient;
     let messageCache: MessageCache;
