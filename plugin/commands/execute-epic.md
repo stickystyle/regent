@@ -155,7 +155,8 @@ Spawning worker Claude for issue #{N}...
 Execute the issue using a **fresh Claude instance**:
 
 ```bash
-claude -p "/execute-issue {issue_number} --auto-confirm" \
+claude -p "/regent:execute-issue {issue_number} --auto-confirm" \
+  --plugin-dir . \
   --dangerously-skip-permissions \
   --max-turns 30 \
   --output-format json \
@@ -164,6 +165,7 @@ claude -p "/execute-issue {issue_number} --auto-confirm" \
 
 **Flags explained:**
 - `-p` - Print mode (non-interactive)
+- `--plugin-dir .` - Load the regent plugin from current directory
 - `--dangerously-skip-permissions` - No permission prompts
 - `--max-turns 30` - Limit per-issue work (prevents runaway)
 - `--output-format json` - Structured output for parsing
