@@ -150,10 +150,12 @@ For more details, see the [User Guide](docs/user-guide.md).
 
 ### Environment Variables
 
-| Variable            | Required | Description                                        |
-| ------------------- | -------- | -------------------------------------------------- |
-| `ANTHROPIC_API_KEY` | Yes      | API key for Claude (from Anthropic Console)        |
-| `GITHUB_TOKEN`      | Yes      | GitHub PAT with `repo` scope for repository access |
+| Variable                   | Required | Description                                            |
+| -------------------------- | -------- | ------------------------------------------------------ |
+| `ANTHROPIC_API_KEY`        | Yes      | API key for Claude (from Anthropic Console)            |
+| `GITHUB_TOKEN`             | Yes      | GitHub PAT with `repo` scope for repository access     |
+| `EXPLORATION_CALLBACK_URL` | Yes      | URL for receiving exploration results from GitHub Actions |
+| `EXPLORATION_SERVICE_REPO` | Yes      | Repository hosting the exploration workflow (`owner/repo`) |
 
 ### Slack App Permissions
 

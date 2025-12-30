@@ -21,6 +21,7 @@ export function defaultEnvProvider(): Record<string, string | undefined> {
     ANTHROPIC_API_KEY: Deno.env.get("ANTHROPIC_API_KEY"),
     GITHUB_TOKEN: Deno.env.get("GITHUB_TOKEN"),
     EXPLORATION_CALLBACK_URL: Deno.env.get("EXPLORATION_CALLBACK_URL"),
+    EXPLORATION_SERVICE_REPO: Deno.env.get("EXPLORATION_SERVICE_REPO"),
   };
 }
 
@@ -62,6 +63,14 @@ export interface SecretManager {
    * @throws Error if called before initialize()
    */
   getExplorationCallbackUrl(): string;
+
+  /**
+   * Get the exploration service repository.
+   *
+   * @returns The repository hosting the exploration workflow (owner/repo format)
+   * @throws Error if called before initialize()
+   */
+  getExplorationServiceRepo(): string;
 }
 
 /**
@@ -71,6 +80,7 @@ const REQUIRED_SECRETS = [
   "ANTHROPIC_API_KEY",
   "GITHUB_TOKEN",
   "EXPLORATION_CALLBACK_URL",
+  "EXPLORATION_SERVICE_REPO",
 ] as const;
 
 /**
@@ -87,6 +97,7 @@ export class SecretManagerImpl implements SecretManager {
   private anthropicApiKey: string | null = null;
   private githubToken: string | null = null;
   private explorationCallbackUrl: string | null = null;
+  private explorationServiceRepo: string | null = null;
 
   /**
    * Create a new SecretManagerImpl.
@@ -120,10 +131,22 @@ export class SecretManagerImpl implements SecretManager {
       }
     }
 
+    // Validate EXPLORATION_SERVICE_REPO format (must be owner/repo)
+    const explorationRepo = env.EXPLORATION_SERVICE_REPO!;
+    const repoParts = explorationRepo.split("/");
+    if (repoParts.length !== 2 || !repoParts[0] || !repoParts[1]) {
+      throw new ValidationError(
+        "Invalid EXPLORATION_SERVICE_REPO format",
+        `EXPLORATION_SERVICE_REPO must be in 'owner/repo' format, got: '${explorationRepo}'`,
+        "Set EXPLORATION_SERVICE_REPO to a valid format like 'myorg/exploration-service'",
+      );
+    }
+
     // Store validated secrets
     this.anthropicApiKey = env.ANTHROPIC_API_KEY!;
     this.githubToken = env.GITHUB_TOKEN!;
     this.explorationCallbackUrl = env.EXPLORATION_CALLBACK_URL!;
+    this.explorationServiceRepo = env.EXPLORATION_SERVICE_REPO!;
     this.initialized = true;
   }
 
@@ -170,6 +193,17 @@ export class SecretManagerImpl implements SecretManager {
     this.ensureInitialized();
     return this.explorationCallbackUrl!;
   }
+
+  /**
+   * Get the exploration service repository.
+   *
+   * @returns The repository hosting the exploration workflow (owner/repo format)
+   * @throws Error if called before initialize()
+   */
+  getExplorationServiceRepo(): string {
+    this.ensureInitialized();
+    return this.explorationServiceRepo!;
+  }
 }
 
 /**
@@ -182,6 +216,7 @@ export class MockSecretManager implements SecretManager {
   private anthropicApiKey = "mock-anthropic-key";
   private githubToken = "mock-github-token";
   private explorationCallbackUrl = "https://mock.example.com/callback";
+  private explorationServiceRepo = "stickystyle/regent";
 
   /**
    * No-op initialization for mock.
@@ -220,6 +255,15 @@ export class MockSecretManager implements SecretManager {
   }
 
   /**
+   * Set the exploration service repository for testing.
+   *
+   * @param repo - The repo to return from getExplorationServiceRepo() (owner/repo format)
+   */
+  setExplorationServiceRepo(repo: string): void {
+    this.explorationServiceRepo = repo;
+  }
+
+  /**
    * Get the configured Anthropic API key.
    *
    * @returns The configured API key (default: "mock-anthropic-key")
@@ -247,6 +291,15 @@ export class MockSecretManager implements SecretManager {
   }
 
   /**
+   * Get the configured exploration service repository.
+   *
+   * @returns The configured repo (default: "stickystyle/regent")
+   */
+  getExplorationServiceRepo(): string {
+    return this.explorationServiceRepo;
+  }
+
+  /**
    * Reset all values to defaults.
    *
    * Useful in test teardown to ensure clean state between tests.
@@ -255,5 +308,6 @@ export class MockSecretManager implements SecretManager {
     this.anthropicApiKey = "mock-anthropic-key";
     this.githubToken = "mock-github-token";
     this.explorationCallbackUrl = "https://mock.example.com/callback";
+    this.explorationServiceRepo = "stickystyle/regent";
   }
 }

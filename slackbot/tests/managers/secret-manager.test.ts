@@ -43,6 +43,7 @@ describe("SecretManager", () => {
         const envProvider = () => ({
           ANTHROPIC_API_KEY: "sk-ant-test123",
           GITHUB_TOKEN: "ghp_test123",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
         });
 
         const manager = new SecretManagerImpl(envProvider);
@@ -51,6 +52,22 @@ describe("SecretManager", () => {
           () => manager.initialize(),
           ValidationError,
           "EXPLORATION_CALLBACK_URL",
+        );
+      });
+
+      it("should throw ValidationError when EXPLORATION_SERVICE_REPO is missing", () => {
+        const envProvider = () => ({
+          ANTHROPIC_API_KEY: "sk-ant-test123",
+          GITHUB_TOKEN: "ghp_test123",
+          EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+        });
+
+        const manager = new SecretManagerImpl(envProvider);
+
+        assertThrows(
+          () => manager.initialize(),
+          ValidationError,
+          "EXPLORATION_SERVICE_REPO",
         );
       });
 
@@ -91,6 +108,7 @@ describe("SecretManager", () => {
           ANTHROPIC_API_KEY: "sk-ant-test123",
           GITHUB_TOKEN: "ghp_test123",
           EXPLORATION_CALLBACK_URL: "",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
         });
 
         const manager = new SecretManagerImpl(envProvider);
@@ -102,11 +120,29 @@ describe("SecretManager", () => {
         );
       });
 
+      it("should throw ValidationError when EXPLORATION_SERVICE_REPO is empty string", () => {
+        const envProvider = () => ({
+          ANTHROPIC_API_KEY: "sk-ant-test123",
+          GITHUB_TOKEN: "ghp_test123",
+          EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "",
+        });
+
+        const manager = new SecretManagerImpl(envProvider);
+
+        assertThrows(
+          () => manager.initialize(),
+          ValidationError,
+          "EXPLORATION_SERVICE_REPO",
+        );
+      });
+
       it("should succeed when all required secrets are present", () => {
         const envProvider = () => ({
           ANTHROPIC_API_KEY: "sk-ant-test123",
           GITHUB_TOKEN: "ghp_test123",
           EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
         });
 
         const manager = new SecretManagerImpl(envProvider);
@@ -132,6 +168,7 @@ describe("SecretManager", () => {
           ANTHROPIC_API_KEY: "sk-ant-test123",
           GITHUB_TOKEN: "ghp_test123",
           EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
         });
 
         const manager = new SecretManagerImpl(envProvider);
@@ -146,12 +183,137 @@ describe("SecretManager", () => {
       });
     });
 
+    describe("EXPLORATION_SERVICE_REPO format validation", () => {
+      it("should throw ValidationError when EXPLORATION_SERVICE_REPO has no slash", () => {
+        const envProvider = () => ({
+          ANTHROPIC_API_KEY: "sk-ant-test123",
+          GITHUB_TOKEN: "ghp_test123",
+          EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "invalid",
+        });
+
+        const manager = new SecretManagerImpl(envProvider);
+
+        assertThrows(
+          () => manager.initialize(),
+          ValidationError,
+          "Invalid EXPLORATION_SERVICE_REPO format",
+        );
+      });
+
+      it("should throw ValidationError when EXPLORATION_SERVICE_REPO has too many slashes", () => {
+        const envProvider = () => ({
+          ANTHROPIC_API_KEY: "sk-ant-test123",
+          GITHUB_TOKEN: "ghp_test123",
+          EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "too/many/slashes",
+        });
+
+        const manager = new SecretManagerImpl(envProvider);
+
+        assertThrows(
+          () => manager.initialize(),
+          ValidationError,
+          "Invalid EXPLORATION_SERVICE_REPO format",
+        );
+      });
+
+      it("should throw ValidationError when EXPLORATION_SERVICE_REPO has empty owner", () => {
+        const envProvider = () => ({
+          ANTHROPIC_API_KEY: "sk-ant-test123",
+          GITHUB_TOKEN: "ghp_test123",
+          EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "/repo",
+        });
+
+        const manager = new SecretManagerImpl(envProvider);
+
+        assertThrows(
+          () => manager.initialize(),
+          ValidationError,
+          "Invalid EXPLORATION_SERVICE_REPO format",
+        );
+      });
+
+      it("should throw ValidationError when EXPLORATION_SERVICE_REPO has empty repo", () => {
+        const envProvider = () => ({
+          ANTHROPIC_API_KEY: "sk-ant-test123",
+          GITHUB_TOKEN: "ghp_test123",
+          EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "owner/",
+        });
+
+        const manager = new SecretManagerImpl(envProvider);
+
+        assertThrows(
+          () => manager.initialize(),
+          ValidationError,
+          "Invalid EXPLORATION_SERVICE_REPO format",
+        );
+      });
+
+      it("should accept valid owner/repo format", () => {
+        const envProvider = () => ({
+          ANTHROPIC_API_KEY: "sk-ant-test123",
+          GITHUB_TOKEN: "ghp_test123",
+          EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "myorg/exploration-service",
+        });
+
+        const manager = new SecretManagerImpl(envProvider);
+
+        // Should not throw
+        manager.initialize();
+        assertEquals(
+          manager.getExplorationServiceRepo(),
+          "myorg/exploration-service",
+        );
+      });
+    });
+
+    describe("getExplorationServiceRepo", () => {
+      it("should return the exploration service repo after initialization", () => {
+        const envProvider = () => ({
+          ANTHROPIC_API_KEY: "sk-ant-test123",
+          GITHUB_TOKEN: "ghp_test123",
+          EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "myorg/exploration-service",
+        });
+
+        const manager = new SecretManagerImpl(envProvider);
+        manager.initialize();
+
+        assertEquals(
+          manager.getExplorationServiceRepo(),
+          "myorg/exploration-service",
+        );
+      });
+
+      it("should throw error when accessed before initialization", () => {
+        const envProvider = () => ({
+          ANTHROPIC_API_KEY: "sk-ant-test123",
+          GITHUB_TOKEN: "ghp_test123",
+          EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
+        });
+
+        const manager = new SecretManagerImpl(envProvider);
+
+        assertThrows(
+          () => manager.getExplorationServiceRepo(),
+          Error,
+          "not initialized",
+        );
+      });
+    });
+
     describe("getAnthropicApiKey", () => {
       it("should return the API key after initialization", () => {
         const envProvider = () => ({
           ANTHROPIC_API_KEY: "sk-ant-test123",
           GITHUB_TOKEN: "ghp_test123",
           EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
         });
 
         const manager = new SecretManagerImpl(envProvider);
@@ -165,6 +327,7 @@ describe("SecretManager", () => {
           ANTHROPIC_API_KEY: "sk-ant-test123",
           GITHUB_TOKEN: "ghp_test123",
           EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
         });
 
         const manager = new SecretManagerImpl(envProvider);
@@ -183,6 +346,7 @@ describe("SecretManager", () => {
           ANTHROPIC_API_KEY: "sk-ant-test123",
           GITHUB_TOKEN: "ghp_test456",
           EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
         });
 
         const manager = new SecretManagerImpl(envProvider);
@@ -196,6 +360,7 @@ describe("SecretManager", () => {
           ANTHROPIC_API_KEY: "sk-ant-test123",
           GITHUB_TOKEN: "ghp_test123",
           EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
         });
 
         const manager = new SecretManagerImpl(envProvider);
@@ -214,6 +379,7 @@ describe("SecretManager", () => {
           ANTHROPIC_API_KEY: "sk-ant-test123",
           GITHUB_TOKEN: "ghp_test123",
           EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
         });
 
         const manager = new SecretManagerImpl(envProvider);
@@ -230,6 +396,7 @@ describe("SecretManager", () => {
           ANTHROPIC_API_KEY: "sk-ant-test123",
           GITHUB_TOKEN: "ghp_test123",
           EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
         });
 
         const manager = new SecretManagerImpl(envProvider);
@@ -249,6 +416,7 @@ describe("SecretManager", () => {
           ANTHROPIC_API_KEY: secretApiKey,
           // Missing GITHUB_TOKEN
           EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
         });
 
         const manager = new SecretManagerImpl(envProvider);
@@ -274,6 +442,7 @@ describe("SecretManager", () => {
           // Missing ANTHROPIC_API_KEY
           GITHUB_TOKEN: secretToken,
           EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
         });
 
         const manager = new SecretManagerImpl(envProvider);
@@ -298,6 +467,7 @@ describe("SecretManager", () => {
           ANTHROPIC_API_KEY: "sk-ant-test123",
           // Missing GITHUB_TOKEN
           EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+          EXPLORATION_SERVICE_REPO: "stickystyle/regent",
         });
 
         const manager = new SecretManagerImpl(envProvider);
@@ -352,6 +522,14 @@ describe("SecretManager", () => {
       );
     });
 
+    it("should return configured exploration service repo", () => {
+      mockManager.setExplorationServiceRepo("myorg/myrepo");
+      assertEquals(
+        mockManager.getExplorationServiceRepo(),
+        "myorg/myrepo",
+      );
+    });
+
     it("should have default values after construction", () => {
       // MockSecretManager should have default test values
       assertEquals(mockManager.getAnthropicApiKey(), "mock-anthropic-key");
@@ -360,12 +538,17 @@ describe("SecretManager", () => {
         mockManager.getExplorationCallbackUrl(),
         "https://mock.example.com/callback",
       );
+      assertEquals(
+        mockManager.getExplorationServiceRepo(),
+        "stickystyle/regent",
+      );
     });
 
     it("should reset to defaults after clear()", () => {
       mockManager.setAnthropicApiKey("custom-key");
       mockManager.setGitHubToken("custom-token");
       mockManager.setExplorationCallbackUrl("https://custom.com/callback");
+      mockManager.setExplorationServiceRepo("custom/repo");
 
       mockManager.clear();
 
@@ -374,6 +557,10 @@ describe("SecretManager", () => {
       assertEquals(
         mockManager.getExplorationCallbackUrl(),
         "https://mock.example.com/callback",
+      );
+      assertEquals(
+        mockManager.getExplorationServiceRepo(),
+        "stickystyle/regent",
       );
     });
 
@@ -391,6 +578,7 @@ describe("SecretManager", () => {
         ANTHROPIC_API_KEY: "sk-ant-env-key",
         GITHUB_TOKEN: "ghp_env-token",
         EXPLORATION_CALLBACK_URL: "https://env.example.com/callback",
+        EXPLORATION_SERVICE_REPO: "myorg/exploration-service",
       });
 
       const manager = new SecretManagerImpl(envProvider);
@@ -402,6 +590,10 @@ describe("SecretManager", () => {
       assertEquals(
         manager.getExplorationCallbackUrl(),
         "https://env.example.com/callback",
+      );
+      assertEquals(
+        manager.getExplorationServiceRepo(),
+        "myorg/exploration-service",
       );
     });
 
@@ -439,6 +631,7 @@ describe("SecretManager", () => {
           env: {
             GITHUB_TOKEN: "ghp_secret",
             EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+            EXPLORATION_SERVICE_REPO: "stickystyle/regent",
           },
           presentSecret: "ghp_secret",
         },
@@ -447,6 +640,7 @@ describe("SecretManager", () => {
           env: {
             ANTHROPIC_API_KEY: "sk-ant-secret",
             EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+            EXPLORATION_SERVICE_REPO: "stickystyle/regent",
           },
           presentSecret: "sk-ant-secret",
         },
@@ -455,6 +649,16 @@ describe("SecretManager", () => {
           env: {
             ANTHROPIC_API_KEY: "sk-ant-secret",
             GITHUB_TOKEN: "ghp_secret",
+            EXPLORATION_SERVICE_REPO: "stickystyle/regent",
+          },
+          presentSecret: "sk-ant-secret",
+        },
+        {
+          name: "missing exploration service repo",
+          env: {
+            ANTHROPIC_API_KEY: "sk-ant-secret",
+            GITHUB_TOKEN: "ghp_secret",
+            EXPLORATION_CALLBACK_URL: "https://example.com/callback",
           },
           presentSecret: "sk-ant-secret",
         },
@@ -486,6 +690,7 @@ describe("SecretManager", () => {
         ANTHROPIC_API_KEY: "sk-ant-test123",
         GITHUB_TOKEN: "ghp_test456",
         EXPLORATION_CALLBACK_URL: "https://example.com/callback",
+        EXPLORATION_SERVICE_REPO: "stickystyle/regent",
       });
 
       const secretManager = new SecretManagerImpl(envProvider);
@@ -494,11 +699,14 @@ describe("SecretManager", () => {
       // Simulate how a client would use the secret manager
       const anthropicApiKey = secretManager.getAnthropicApiKey();
       const githubToken = secretManager.getGitHubToken();
+      const explorationServiceRepo = secretManager.getExplorationServiceRepo();
 
       assertEquals(typeof anthropicApiKey, "string");
       assertEquals(typeof githubToken, "string");
+      assertEquals(typeof explorationServiceRepo, "string");
       assertEquals(anthropicApiKey.length > 0, true);
       assertEquals(githubToken.length > 0, true);
+      assertEquals(explorationServiceRepo.length > 0, true);
     });
   });
 });

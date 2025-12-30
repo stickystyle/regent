@@ -601,6 +601,7 @@ export class GitHubClientImpl implements GitHubClient {
    * @param githubApi - GitHub API object with get/post/patch methods
    * @param token - GitHub personal access token
    * @param retryConfig - Optional retry configuration (defaults to 3 attempts)
+   * @param explorationServiceRepo - Repository hosting the exploration workflow (owner/repo format)
    */
   constructor(
     private readonly githubApi: {
@@ -618,6 +619,7 @@ export class GitHubClientImpl implements GitHubClient {
     },
     private readonly token: string,
     retryConfig?: Partial<RetryConfig>,
+    private readonly explorationServiceRepo: string = "stickystyle/regent",
   ) {
     this.retryHandler = new RetryHandler(retryConfig);
   }
@@ -1407,9 +1409,8 @@ export class GitHubClientImpl implements GitHubClient {
     sessionId: string,
   ): Promise<void> {
     return await this.retryHandler.execute(async () => {
-      // The exploration service workflow is in the regent repository
-      const explorationOwner = "stickystyle";
-      const explorationRepo = "regent";
+      // Parse the exploration service repository from configuration
+      const [explorationOwner, explorationRepo] = this.explorationServiceRepo.split("/");
       const workflowId = "explore-codebase.yml";
 
       const url =

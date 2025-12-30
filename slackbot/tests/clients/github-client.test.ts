@@ -3185,4 +3185,91 @@ describe("Property 8: PR Creation Conditional", () => {
     // Verify it requested the ref for the custom branch
     assertEquals(baseRefUrl.includes("feature-base"), true);
   });
+
+  it("should use configurable exploration service repo in triggerExploration", async () => {
+    let capturedUrl = "";
+
+    const mockApi: MockGitHubApi = {
+      get: (_url: string, _headers?: Record<string, string>) =>
+        Promise.resolve(new Response(JSON.stringify({}), { status: 200 })),
+      post: (
+        url: string,
+        _body: unknown,
+        _headers?: Record<string, string>,
+      ) => {
+        capturedUrl = url;
+        // workflow_dispatch returns 204 No Content on success
+        return Promise.resolve(new Response(null, { status: 204 }));
+      },
+      patch: (_url: string, _body: unknown, _headers?: Record<string, string>) =>
+        Promise.resolve(new Response(JSON.stringify({}), { status: 200 })),
+    };
+
+    // Pass a custom exploration service repo
+    const client = new GitHubClientImpl(
+      mockApi,
+      "token",
+      undefined,
+      "myorg/custom-exploration-service",
+    );
+
+    await client.triggerExploration(
+      "target-owner/target-repo",
+      "Add a feature",
+      "https://callback.example.com",
+      "session-123",
+    );
+
+    // Verify the URL uses the custom exploration service repo
+    assertEquals(
+      capturedUrl.includes("myorg/custom-exploration-service"),
+      true,
+      `Expected URL to contain 'myorg/custom-exploration-service', got: ${capturedUrl}`,
+    );
+    assertEquals(
+      capturedUrl.includes("explore-codebase.yml"),
+      true,
+      `Expected URL to contain 'explore-codebase.yml', got: ${capturedUrl}`,
+    );
+  });
+
+  it("should correctly parse owner and repo from exploration service config", async () => {
+    let capturedUrl = "";
+
+    const mockApi: MockGitHubApi = {
+      get: (_url: string, _headers?: Record<string, string>) =>
+        Promise.resolve(new Response(JSON.stringify({}), { status: 200 })),
+      post: (
+        url: string,
+        _body: unknown,
+        _headers?: Record<string, string>,
+      ) => {
+        capturedUrl = url;
+        return Promise.resolve(new Response(null, { status: 204 }));
+      },
+      patch: (_url: string, _body: unknown, _headers?: Record<string, string>) =>
+        Promise.resolve(new Response(JSON.stringify({}), { status: 200 })),
+    };
+
+    // Pass exploration service repo with different owner/repo
+    const client = new GitHubClientImpl(
+      mockApi,
+      "token",
+      undefined,
+      "different-org/exploration-workflows",
+    );
+
+    await client.triggerExploration(
+      "target/repo",
+      "idea",
+      "https://callback.com",
+      "session",
+    );
+
+    // Verify the URL is correctly formed with owner and repo
+    assertEquals(
+      capturedUrl,
+      "https://api.github.com/repos/different-org/exploration-workflows/actions/workflows/explore-codebase.yml/dispatches",
+    );
+  });
 });
