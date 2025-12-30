@@ -11,7 +11,12 @@ Implement a task from a GitHub issue, working on a shared feature branch with a 
 ```
 /regent:execute-issue {issue-number}
 /regent:execute-issue {issue-url}
+/regent:execute-issue {issue-number} --auto-confirm
 ```
+
+### Flags
+
+- `--auto-confirm`: Skip Phase 6.5 (Human Review) and proceed directly to commit. Used by `/regent:execute-epic` when spawning worker Claude instances for autonomous execution.
 
 ## Phase 1: Initialization (Script-Based)
 
@@ -335,7 +340,16 @@ If tests fail:
 - Re-run code review if changes were significant
 - Re-run tests
 
-## Phase 6.5: Human Review (REQUIRED)
+## Phase 6.5: Human Review
+
+**Check for `--auto-confirm` flag first.**
+
+### If `--auto-confirm` is set:
+Skip this phase entirely. Proceed directly to Phase 7 (Commit and Push).
+
+This flag is used by `/regent:execute-epic` for autonomous overnight execution.
+
+### If `--auto-confirm` is NOT set (default):
 
 **STOP HERE** - Do not proceed to commit until the user confirms.
 
