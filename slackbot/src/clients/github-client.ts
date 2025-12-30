@@ -1412,7 +1412,8 @@ export class GitHubClientImpl implements GitHubClient {
       const explorationRepo = "regent";
       const workflowId = "explore-codebase.yml";
 
-      const url = `${this.baseUrl}/repos/${explorationOwner}/${explorationRepo}/actions/workflows/${workflowId}/dispatches`;
+      const url =
+        `${this.baseUrl}/repos/${explorationOwner}/${explorationRepo}/actions/workflows/${workflowId}/dispatches`;
 
       const response = await this.githubApi.post(
         url,

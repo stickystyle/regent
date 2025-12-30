@@ -325,9 +325,7 @@ describe("SessionOrchestrator", () => {
         await orchestrator.handleSlashCommand(command, threadTs);
 
         const messages = messagingClient.getPostedMessages();
-        const errorMessage = messages.find((m) =>
-          m.text.toLowerCase().includes("access denied")
-        );
+        const errorMessage = messages.find((m) => m.text.toLowerCase().includes("access denied"));
         assertExists(errorMessage);
       });
     });

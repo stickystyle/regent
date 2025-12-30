@@ -18,7 +18,21 @@ Autonomous serial execution of all tasks in a GitHub epic. Designed for overnigh
 
 ### 0.1 Ensure Sandbox Settings
 
-Check if `.claude/settings.local.json` exists. If not, create it with sandbox configuration for autonomous execution:
+Check `.claude/settings.local.json` for required sandbox configuration.
+
+**Required settings for autonomous execution:**
+- `sandbox.enabled` must be `true`
+- `sandbox.autoAllowBashIfSandboxed` must be `true`
+
+**Validation logic:**
+
+1. If file doesn't exist → create it with full config (below)
+2. If file exists → read and validate:
+   - If `sandbox.enabled !== true` → **WARN** and offer to add it
+   - If `sandbox.autoAllowBashIfSandboxed !== true` → **WARN** and offer to add it
+   - If both are correct → proceed silently
+
+**If creating new file, use this config:**
 
 ```json
 {
@@ -43,7 +57,23 @@ Check if `.claude/settings.local.json` exists. If not, create it with sandbox co
 }
 ```
 
-If the file already exists, do NOT modify it - respect existing settings.
+**If file exists but missing sandbox settings:**
+
+Report warning and ask user:
+```
+⚠️  Sandbox not configured for autonomous execution.
+
+Current .claude/settings.local.json is missing:
+- sandbox.enabled: true
+- sandbox.autoAllowBashIfSandboxed: true
+
+Without these settings, Claude will pause for permission prompts overnight.
+
+Add sandbox settings to enable autonomous execution?
+```
+
+If user confirms, merge the sandbox config into the existing file (preserving other settings).
+If user declines, warn that execution may pause on permission prompts but continue.
 
 ### 0.2 Run Initialization Script
 
@@ -125,7 +155,7 @@ Spawning worker Claude for issue #{N}...
 Execute the issue using a **fresh Claude instance**:
 
 ```bash
-claude -p "/regent:execute-issue {issue_number} --auto-confirm" \
+claude -p "/execute-issue {issue_number} --auto-confirm" \
   --dangerously-skip-permissions \
   --max-turns 30 \
   --output-format json \
@@ -196,7 +226,7 @@ Report:
 
 ## Note: execute-issue --auto-confirm Flag
 
-The `/regent:execute-issue` command needs a `--auto-confirm` flag that:
+The `/execute-issue` command needs a `--auto-confirm` flag that:
 - Skips Phase 6.5 (Human Review)
 - Proceeds directly from verification to commit
 - Used only when spawned by execute-epic
@@ -281,7 +311,7 @@ Execution stopped at Issue #{N} (phase: {phase})
 Error: {error_message}
 
 To resume after fixing:
-  /regent:execute-epic {EPIC_NUM}
+  /execute-epic {EPIC_NUM}
 
 The command will automatically resume from Issue #{N}.
 ```
@@ -316,14 +346,14 @@ For fully autonomous execution:
 2. **GitHub CLI**: Authenticated with `gh auth login`
 3. **Claude CLI flags**:
    ```bash
-   claude -p "/regent:execute-epic 42" \
+   claude -p "/execute-epic 42" \
      --dangerously-skip-permissions \
      --max-turns 100
    ```
 
 ## If Unclear
 
-Unlike `/regent:execute-issue`, this command does NOT stop to ask questions. If something is ambiguous:
+Unlike `/execute-issue`, this command does NOT stop to ask questions. If something is ambiguous:
 - Make reasonable assumptions based on existing patterns
 - Document assumptions in commit messages
 - If truly blocked, fail and preserve state for manual intervention

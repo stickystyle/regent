@@ -6,7 +6,8 @@ Parent Epic: #42
 
 ## Task Description
 
-Implement the ROSI webhook handler that receives exploration results from the GitHub Actions workflow.
+Implement the ROSI webhook handler that receives exploration results from the GitHub Actions
+workflow.
 
 **Type**: test-first
 
@@ -71,9 +72,11 @@ No comments on this issue.
 
 #### ExplorationCallback Type (Not Yet Defined)
 
-Based on the GitHub Actions workflow in `.github/workflows/explore-codebase.yml`, the webhook will receive two possible payloads:
+Based on the GitHub Actions workflow in `.github/workflows/explore-codebase.yml`, the webhook will
+receive two possible payloads:
 
 **Success Payload (lines 181-189 of workflow)**:
+
 ```typescript
 interface ExplorationCallbackSuccess {
   session_id: string;
@@ -97,6 +100,7 @@ interface ExplorationCallbackSuccess {
 ```
 
 **Error Payload (lines 236-248 of workflow)**:
+
 ```typescript
 interface ExplorationCallbackError {
   session_id: string;
@@ -112,7 +116,8 @@ interface ExplorationCallbackError {
 
 **File**: `slackbot/src/orchestrators/session-orchestrator.ts`
 
-- **What exists**: The orchestrator has `handleSlashCommand()` and `runToolLoop()` methods, but **NO `handleExplorationResult()` method** exists yet
+- **What exists**: The orchestrator has `handleSlashCommand()` and `runToolLoop()` methods, but **NO
+  `handleExplorationResult()` method** exists yet
 - **Pattern for exploration**: Lines 99-108 show temporary in-memory caching of exploration context:
   ```typescript
   private repositoryContextCache: Map<string, RepositoryContext>;
@@ -121,8 +126,10 @@ interface ExplorationCallbackError {
     this.repositoryContextCache.set(sessionId, repositoryContext);
   }
   ```
-- **Error handling pattern**: Uses typed errors (`ValidationError`, `GitHubAccessError`, `BaseError`) with `.toSlackMessage()` for display
-- **Message posting pattern**: Uses `messagingClient.postMessage(channelId, threadTs, messageText)` to post to threads
+- **Error handling pattern**: Uses typed errors (`ValidationError`, `GitHubAccessError`,
+  `BaseError`) with `.toSlackMessage()` for display
+- **Message posting pattern**: Uses `messagingClient.postMessage(channelId, threadTs, messageText)`
+  to post to threads
 
 #### Session Manager Integration
 
@@ -131,7 +138,8 @@ interface ExplorationCallbackError {
 - `updateSession(session: Session)` exists at line 109+ for persisting session state changes
 - Session ID format: `${channelId}:${threadTs}` (see `formatSessionId()` in session.ts)
 - Session lookup: Via `datastore.get(sessionId)` in SessionManager
-- Phase transition: Can change `session.phase` from `Phase.Questioning` to `Phase.Review` (line 429 shows pattern)
+- Phase transition: Can change `session.phase` from `Phase.Questioning` to `Phase.Review` (line 429
+  shows pattern)
 
 #### Slack Message Client
 
@@ -161,6 +169,7 @@ postMessage(
 **File**: `slackbot/src/errors/types.ts`
 
 Base error hierarchy exists with proper Slack formatting. Key pattern (line 41-51):
+
 ```typescript
 toSlackMessage(): string {
   const lines = [
@@ -175,13 +184,16 @@ toSlackMessage(): string {
 ```
 
 Authentication/Authorization errors:
-- No existing error type for invalid Authorization header → will need to implement as `ValidationError` or new type
+
+- No existing error type for invalid Authorization header → will need to implement as
+  `ValidationError` or new type
 
 #### Session Persistence
 
 **File**: `slackbot/src/datastores/sessions.ts`
 
 Session schema includes fields that will need updating:
+
 - `session_id`: primary key (already set from `--repo` initialization)
 - `phase`: needs transition from initial phase to `questioning` after exploration
 - `repository`: already stored during session creation
@@ -237,6 +249,7 @@ Session schema includes fields that will need updating:
 #### Handler Test Pattern: `slackbot/tests/handlers/slash-command.test.ts`
 
 Tests follow function → describe structure (lines 13-135):
+
 - Test one function at a time with nested describe blocks
 - Use descriptive `it()` labels explaining the scenario
 - Use `assertEquals()` for assertions on outputs
@@ -272,6 +285,7 @@ describe("MockSlackMessagingClient", () => {
 ```
 
 The mock client supports:
+
 - `.setPostMessageError(error)` to inject failures
 - `.clear()` for test cleanup
 - `postMessage()` returns `PostMessageResult`
@@ -283,6 +297,7 @@ The mock client supports:
 #### Import Style
 
 From `slash-command.ts` (lines 4-5):
+
 ```typescript
 import { ValidationError } from "../errors/types.ts";
 import type { SlackSlashCommandInput, SlashCommand } from "../types/slash-command.ts";
@@ -295,6 +310,7 @@ import type { SlackSlashCommandInput, SlashCommand } from "../types/slash-comman
 #### Error Handling
 
 From `session-orchestrator.ts` (lines 173-188):
+
 ```typescript
 try {
   // operation
@@ -322,6 +338,7 @@ try {
 #### Type Hints and Function Documentation
 
 From `session-manager.ts` (lines 67-82):
+
 ```typescript
 /**
  * Create a new session record with TTL.
@@ -348,6 +365,7 @@ async createSession(
 #### Session ID Format
 
 From `session.ts` (lines 127-129):
+
 ```typescript
 export function formatSessionId(channelId: string, threadTs: string): string {
   return `${channelId}:${threadTs}`;
@@ -363,10 +381,12 @@ export function formatSessionId(channelId: string, threadTs: string): string {
 ### Files to Modify
 
 #### 1. `slackbot/src/types/index.ts`
+
 - **Change**: Add export for new `ExplorationCallback` type (to be defined in separate file or here)
 - **Rationale**: Make the type available throughout the application
 
 #### 2. `slackbot/src/orchestrators/session-orchestrator.ts`
+
 - **Change**: Add `handleExplorationResult()` method
 - **Signature**:
   ```typescript
@@ -374,11 +394,13 @@ export function formatSessionId(channelId: string, threadTs: string): string {
   ```
 - **Implementation flow** (per design.md lines 160-177):
   1. Load session by `session_id`
-  2. If status == "success": store exploration_context, update phase, post summary, generate first question
+  2. If status == "success": store exploration_context, update phase, post summary, generate first
+     question
   3. If status == "error": post error message, offer to continue without context
 - **Rationale**: This is the handler that receives webhook callbacks and continues the flow
 
 #### 3. Create new file: `slackbot/src/handlers/exploration-handler.ts`
+
 - **Purpose**: HTTP webhook handler for exploration callback
 - **Responsibilities**:
   1. Validate Authorization header against CALLBACK_SECRET
@@ -387,6 +409,7 @@ export function formatSessionId(channelId: string, threadTs: string): string {
 - **Pattern**: Similar to `finalization-handler.ts` structure
 
 #### 4. Create new file: `slackbot/tests/handlers/exploration-handler.test.ts`
+
 - **Test coverage**:
   1. Authentication validation (valid/invalid/missing Authorization header)
   2. Payload parsing (success and error payloads)
@@ -395,6 +418,7 @@ export function formatSessionId(channelId: string, threadTs: string): string {
   5. Continuation flow (exploration summary → first question)
 
 #### 5. Create new file: `slackbot/tests/orchestrators/exploration-result.test.ts`
+
 - **Test coverage**: `SessionOrchestrator.handleExplorationResult()` method
   1. Success case: update session, post summary, generate question
   2. Error case: post error message, offer to continue
@@ -408,11 +432,13 @@ export function formatSessionId(channelId: string, threadTs: string): string {
 #### Type Definitions
 
 **`slackbot/src/types/session.ts`**
+
 - Defines `Session` interface with all fields needed for exploration storage
 - Defines `Phase` enum (Questioning, Review, Finalized)
 - Shows how to format session IDs
 
 **`slackbot/src/types/repository-context.ts`**
+
 - Defines `RepositoryContext` interface (what exploration returns)
 - Will be stored in session during webhook handling
 - Contains: framework, patterns, relevant_files, structure
@@ -420,12 +446,14 @@ export function formatSessionId(channelId: string, threadTs: string): string {
 #### Error Types
 
 **`slackbot/src/errors/types.ts`**
+
 - Defines error hierarchy and `.toSlackMessage()` pattern
 - For webhook auth failures: use `ValidationError` for 400/401 cases
 
 #### Session Management
 
 **`slackbot/src/managers/session-manager.ts`**
+
 - Shows how to load and update sessions
 - Patterns for phase transitions
 - Error handling for missing sessions
@@ -433,22 +461,26 @@ export function formatSessionId(channelId: string, threadTs: string): string {
 #### Message Client
 
 **`slackbot/src/clients/messaging-client.ts`**
+
 - Interface for posting messages to threads
 - Shows signature for `postMessage(channelId, threadTs, text)`
 
 #### Existing Handlers
 
 **`slackbot/src/handlers/finalization-handler.ts`**
+
 - Reference for handler structure and error handling patterns
 - Shows how to validate state and post messages
 
 **`slackbot/src/handlers/slash-command.ts`**
+
 - Shows input validation patterns
 - Shows how to throw ValidationError for invalid input
 
 #### GitHub Actions Workflow
 
 **`.github/workflows/explore-codebase.yml`**
+
 - Lines 181-189: Success callback payload structure
 - Lines 236-248: Error callback payload structure
 - Lines 199, 258: Authorization header format (`Authorization: Bearer $CALLBACK_SECRET`)
@@ -456,11 +488,13 @@ export function formatSessionId(channelId: string, threadTs: string): string {
 #### Test Examples
 
 **`slackbot/tests/handlers/finalization-handler.test.ts`**
+
 - BDD test structure patterns
 - Mock setup and teardown
 - Handler testing patterns
 
 **`slackbot/tests/clients/messaging-client.test.ts`**
+
 - Mock client usage patterns
 - Threaded message test examples
 
@@ -468,22 +502,29 @@ export function formatSessionId(channelId: string, threadTs: string): string {
 
 ### Implementation Notes
 
-1. **Webhook Authentication**: The Authorization header will be `Bearer ${CALLBACK_SECRET}`. Validate by comparing the token part to an environment variable or configured secret.
+1. **Webhook Authentication**: The Authorization header will be `Bearer ${CALLBACK_SECRET}`.
+   Validate by comparing the token part to an environment variable or configured secret.
 
-2. **Exploration Context Integration**: The exploration results need to be converted from the GitHub Actions response format to a `RepositoryContext` object that matches the type used elsewhere in the app.
+2. **Exploration Context Integration**: The exploration results need to be converted from the GitHub
+   Actions response format to a `RepositoryContext` object that matches the type used elsewhere in
+   the app.
 
-3. **Thread Identification**: Extract `channelId` and `threadTs` by splitting the `session_id` on `:` to get the proper destination for Slack messages.
+3. **Thread Identification**: Extract `channelId` and `threadTs` by splitting the `session_id` on
+   `:` to get the proper destination for Slack messages.
 
-4. **Error Recovery**: If a session is not found (404), log a warning but don't crash. The webhook should still return 2xx success to prevent GitHub Actions retries.
+4. **Error Recovery**: If a session is not found (404), log a warning but don't crash. The webhook
+   should still return 2xx success to prevent GitHub Actions retries.
 
-5. **Message Format**: Follow the pattern from `SessionOrchestrator.postExplorationSummary()` (lines 220-247) for formatting the exploration summary message.
+5. **Message Format**: Follow the pattern from `SessionOrchestrator.postExplorationSummary()` (lines
+   220-247) for formatting the exploration summary message.
 
-6. **Test Data**: Create fixture sessions with proper format and phase before running handler tests. Use `TestDatastoreClient` to pre-populate sessions.
+6. **Test Data**: Create fixture sessions with proper format and phase before running handler tests.
+   Use `TestDatastoreClient` to pre-populate sessions.
 
 7. **File Structure**: Tests should be organized as:
    - `tests/handlers/exploration-handler.test.ts` for webhook handler logic
    - `tests/orchestrators/exploration-result.test.ts` for session orchestrator method logic
 
 ---
-*Branch: feature/regent-slack-bot*
-*Generated at execution time by Regent*
+
+_Branch: feature/regent-slack-bot_ _Generated at execution time by Regent_

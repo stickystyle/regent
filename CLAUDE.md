@@ -20,6 +20,9 @@ deno task check             # Type-check all TypeScript
 deno task lint              # Lint code
 deno task fmt               # Format code
 
+# Run single test file
+deno test --allow-read --allow-net --allow-env tests/path/to/file.test.ts
+
 slack login                 # Authenticate with Slack CLI
 slack run                   # Run locally
 slack deploy                # Deploy to Slack infrastructure
@@ -73,6 +76,42 @@ Uses Slack ROSI (Run On Slack Infrastructure) platform. Key files:
 - `triggers/` - Trigger configurations
 
 Outgoing domains: `api.anthropic.com`, `api.github.com`
+
+### Component Structure
+
+```
+slackbot/src/
+├── orchestrators/     # SessionOrchestrator - coordinates brainstorm flow
+├── managers/          # SessionManager, EpicManager, CanvasManager, MessageCache
+├── handlers/          # SlashCommand, MessageEvent, ExplorationHandler, PivotHandler
+├── clients/           # AnthropicClient, GitHubClient, SlackMessagingClient
+├── processors/        # AttachmentProcessor
+├── datastores/        # Slack Datastore session persistence
+├── explorers/         # RepositoryExplorer
+├── types/             # Session, Message, RepositoryContext, etc.
+└── errors/            # BaseError hierarchy, retry logic
+```
+
+### Design Constraints
+
+- ROSI has 60-second function timeout
+- Deep codebase exploration offloaded to GitHub Actions workflow
+- Mid-conversation code lookups use Anthropic MCP Connector
+- Sessions can span up to 30 days, identified by channel+thread
+- Specs stored as collapsible comments on GitHub Epic issues
+
+### Session Phases
+
+`Initializing` → `Questioning` → `Review` → `Finalized`
+
+- **Initializing**: Waiting for GitHub Actions exploration
+- **Questioning**: Q&A loop with confidence tracking (threshold: 95)
+- **Review**: User reviewing synthesized spec in Canvas
+- **Finalized**: Spec committed to Epic issue
+
+### Test Organization
+
+Tests mirror source structure under `tests/`. Each component has a corresponding `.test.ts` file. Integration tests are in `tests/integration/`.
 
 ## Spec Output Directory
 
