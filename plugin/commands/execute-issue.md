@@ -11,60 +11,97 @@ Implement a task from a GitHub issue, working on a shared feature branch with a 
 ```
 /regent:execute-issue {issue-number}
 /regent:execute-issue {issue-url}
+/regent:execute-issue {issue-number} --auto-confirm
 ```
 
-## Prerequisites
+### Flags
 
-1. Verify this is a Git repository with a GitHub remote
-2. Parse the issue number from the argument
-3. Fetch the issue and validate it has the `regent` label
+- `--auto-confirm`: Skip Phase 6.5 (Human Review) and proceed directly to commit. Used by `/regent:execute-epic` when spawning worker Claude instances for autonomous execution.
 
-## Phase 1: Fetch Issue Context
+## Phase 1: Initialization (Script-Based)
 
-1. Get issue details:
-   ```bash
-   gh issue view {N} --json number,title,body,labels
-   ```
+Run the initialization script to handle all mechanical setup:
 
-2. Parse the spec name from labels (find label matching `spec:*`)
+```bash
+plugin/scripts/init-execute-issue.sh {issue-number-or-url}
+```
 
-3. If no `regent` label, warn user this may not be a Regent-managed issue
+This script handles:
+- Fetching issue details (number, title, body, labels, comments)
+- Extracting spec name from labels
+- Finding and downloading specs from parent Epic
+- Validating spec hash
+- Git branch setup (stash if needed, fetch, checkout/create feature branch)
+- Creating `.regent/{spec-name}/briefs/` directory
 
-4. Verify `.regent/{spec-name}/` exists locally
-   - If not, ask user if they want to proceed anyway
+The script outputs structured data including:
+- `ISSUE_NUM`, `ISSUE_TITLE`, `ISSUE_BODY_FILE`, `COMMENTS_FILE`
+- `SPEC_NAME`, `SPEC_DIR`, `BRIEFS_DIR`, `EPIC_NUM`
+- `HASH_STATUS` (valid|missing|mismatch), `HASH_MESSAGE`
+- `BRANCH`, `BRANCH_ACTION` (created|switched|already_on), `STASHED`
 
-## Phase 2: Feature Branch Setup
+### Report initialization results to user:
 
-1. Ensure working directory is clean:
-   ```bash
-   git status --porcelain
-   ```
-   - If dirty, ask user to commit or stash changes
+```
+Task #{ISSUE_NUM}: {ISSUE_TITLE}
 
-2. Fetch latest from remote:
-   ```bash
-   git fetch origin
-   ```
+Specs: Downloaded from Epic #{EPIC_NUM} to {SPEC_DIR}/
+Branch: {BRANCH} ({BRANCH_ACTION})
+{if STASHED: "Stashed local changes"}
 
-3. Get the default branch name:
-   ```bash
-   gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'
-   ```
+Hash: {HASH_MESSAGE}
+```
 
-4. Check if feature branch exists and set up accordingly:
-   ```bash
-   if git show-ref --verify --quiet refs/remotes/origin/feature/{spec-name}; then
-     # Feature branch exists - check it out and update
-     git checkout feature/{spec-name}
-     git pull origin feature/{spec-name}
-   else
-     # First task for this spec - create feature branch from default branch
-     git checkout -b feature/{spec-name} origin/{default-branch}
-     git push -u origin feature/{spec-name}
-   fi
-   ```
+### Handle hash mismatch (only case requiring Claude interaction)
 
-## Phase 3: Explore Codebase (REQUIRED - Use Subagent)
+If `HASH_STATUS="mismatch"`, invoke validation:
+
+```
+subagent_type: "regent-spec-validator"
+description: "Validate task against updated specs"
+prompt: |
+  Validate whether this task is still valid given the updated spec documents.
+
+  ## Task Brief (from Issue #{N})
+
+  {read ISSUE_BODY_FILE}
+
+  ## Current Spec Documents
+
+  {read SPEC_DIR/requirements.md}
+  {read SPEC_DIR/design.md}
+
+  ## Your Task
+
+  Analyze whether this task is still valid given the updated specs. Look for:
+
+  1. **Obsolete functionality**: Does the task implement something no longer required?
+  2. **Missing functionality**: Do updated specs require additional work not in this task?
+  3. **Conflicts**: Does the task contradict any updated spec requirements or design?
+  4. **Scope changes**: Has the scope of this task changed based on updated specs?
+
+  ## Output Format
+
+  **Recommendation**: PROCEED | UPDATE_TASK | ABORT
+  **Analysis**: {List specific issues or confirmations}
+```
+
+Based on recommendation:
+- **PROCEED**: Continue to Phase 2
+- **UPDATE_TASK**: Ask user to choose: proceed anyway, abort and update issue, or abort
+- **ABORT**: Ask user to confirm abort or proceed anyway (not recommended)
+
+If user aborts:
+```
+Execution aborted.
+
+Next steps:
+1. Review the spec changes in Epic #{EPIC_NUM}
+2. Update this issue if needed: gh issue edit {N} --body "..."
+3. Or re-run /regent:plan --epic ${EPIC_NUM} to regenerate tasks
+```
+
+## Phase 2: Explore Codebase (REQUIRED - Use Subagent)
 
 **Important**: NOW we explore the codebase to get fresh, current references.
 
@@ -78,7 +115,7 @@ prompt: |
 
   ## Task Context (from GitHub Issue)
 
-  {paste the issue body here}
+  {read ISSUE_BODY_FILE}
 
   ## What to Find
 
@@ -131,19 +168,26 @@ prompt: |
   - [file path]: [why relevant]
 ```
 
-## Phase 4: Create Local Brief
+## Phase 3: Create Local Brief
 
 Combine the issue content with codebase exploration into a full task brief.
 
-1. Create briefs directory if needed: `.regent/{spec-name}/briefs/`
-
-2. Save to `.regent/{spec-name}/briefs/task-{N}.md`:
+Save to `{BRIEFS_DIR}/task-{N}.md`:
    ```markdown
    # Task Brief
 
    ## From Issue #{N}
 
    {issue body content}
+
+   ## Issue Discussion
+
+   {If comments exist, include them chronologically:}
+
+   **@{author}** ({relative time}):
+   > {comment body}
+
+   {If no comments, omit this section entirely}
 
    ## Codebase Context
 
@@ -154,64 +198,135 @@ Combine the issue content with codebase exploration into a full task brief.
    *Generated at execution time by Regent*
    ```
 
-3. Present the combined brief to the user
+Present the combined brief to the user.
 
 Ask: "Ready to proceed with Task {N}: {Title}?"
 
 Wait for confirmation before continuing.
 
-## Phase 5: Implementation
+## Phase 4: Implementation (REQUIRED - Use Subagent)
 
 On confirmation, implement the task using specialized agents.
 
-**Important**: When invoking agents, tell them to read `.regent/{spec-name}/briefs/task-{N}.md` for full context.
+**Important**: You MUST delegate implementation to a specialized agent using the Task tool. Do NOT implement code directly in the main context.
 
 ### Selecting the Right Agent
 
-| Task Type | Agent |
-|-----------|-------|
-| Python backend code | regent-python-engineer |
-| AWS CDK infrastructure | regent-cdk-architect |
-| Test writing | regent-test-engineer |
-| Code review (after significant changes) | regent-code-reviewer |
+Determine the primary technology from the spec directory (look for `deno.json`, `package.json`, `pyproject.toml`, `cdk.json`, etc.) and select accordingly:
 
-### For Test Tasks
+| Project Technology | Agent (subagent_type) |
+|-------------------|----------------------|
+| Python (pyproject.toml, requirements.txt) | `regent-python-engineer` |
+| TypeScript/JavaScript (deno.json, package.json, tsconfig.json) | `regent-typescript-engineer` |
+| AWS CDK (cdk.json) | `regent-cdk-architect` |
+| Other languages (Go, Rust, Java, etc.) | `regent-engineer` |
 
-1. Write the test file following project conventions
-2. Use patterns from the Template Reference section of the brief
-3. Run the test to confirm it fails (TDD red phase)
-4. If the test passes unexpectedly, investigate
+**Note**: All agents handle TDD workflow (test-first tasks). Select based on **language**, not task type.
 
-### For Implementation Tasks
+### Implementation Invocation
 
-1. Implement the code following the interfaces from design.md exactly
-2. Run related tests to verify (TDD green phase)
-3. Refactor if needed while keeping tests green
+Use the Task tool with these parameters:
 
-### Implementation Guidelines
+```
+subagent_type: "{appropriate-agent-from-table}"
+description: "Implement task {N}: {brief title}"
+prompt: |
+  Read `.regent/{spec-name}/briefs/task-{N}.md` for full context on what to implement.
 
-- Follow existing code patterns in the project
-- Use the interfaces exactly as defined in the issue's Design Context
-- Add appropriate error handling
-- Include docstrings and type hints
-- Keep changes focused on the single task
+  ## Task Summary
 
-## Phase 6: Code Review (REQUIRED)
+  {paste the task title and key points from the brief}
+
+  ## What to Do
+
+  {For test tasks}:
+  1. Write the test file following project conventions
+  2. Use patterns from the Template Reference section of the brief
+  3. Run the test to confirm it fails (TDD red phase)
+  4. If the test passes unexpectedly, investigate
+
+  {For implementation tasks}:
+  1. Implement the code following the interfaces from design.md exactly
+  2. Run related tests to verify (TDD green phase)
+  3. Refactor if needed while keeping tests green
+
+  ## Implementation Guidelines
+
+  - Follow existing code patterns in the project
+  - Use the interfaces exactly as defined in the Design Context
+  - Add appropriate error handling
+  - Include docstrings and type hints
+  - Keep changes focused on the single task
+
+  ## Output
+
+  Report what files were created/modified and the test results.
+```
+
+## Phase 5: Code Review (REQUIRED - Use Subagent)
 
 After implementation, you MUST run the code-reviewer agent.
 
+### Code Review Invocation
+
+Use the Task tool with these parameters:
+
+```
+subagent_type: "regent-code-reviewer"
+description: "Review task {N} implementation"
+prompt: |
+  Review the code changes made for Task {N}.
+
+  Read `.regent/{spec-name}/briefs/task-{N}.md` for context on what was implemented.
+
+  Focus on:
+  - Code quality and maintainability
+  - Security vulnerabilities
+  - Adherence to the design from design.md
+  - Proper error handling
+  - Test coverage adequacy
+  - Consistency with project patterns
+
+  Provide your review in the standard format with Critical Issues, Warnings, and Suggestions.
+```
+
 ### Code Review Loop
 
-1. **Invoke the code-reviewer agent**:
-   - Use the Task tool with `subagent_type: "regent-code-reviewer"`
-   - Tell it to review the changes made for Task {N}
-   - Point it to `.regent/{spec-name}/briefs/task-{N}.md` for context
+1. **Evaluate the review results**:
+   - If the review passes with no Critical Issues → proceed to Phase 6
+   - If issues identified → continue to step 2
 
-2. **Evaluate the review results**:
-   - If the review passes → proceed to Phase 7
-   - If issues identified → fix with the same implementation agent, then re-review
+2. **Fix issues using the SAME implementation agent (Use Subagent)**:
+   - You MUST delegate fixes to the same agent type that did the original implementation
+   - Do NOT fix code directly in the main context
+   - Use the Task tool:
 
-## Phase 7: Verification
+   ```
+   subagent_type: "{same-agent-as-phase-4}"
+   description: "Fix review issues for task {N}"
+   prompt: |
+     Read `.regent/{spec-name}/briefs/task-{N}.md` for the original task context.
+
+     ## Code Review Feedback
+
+     {paste the code review results here}
+
+     ## What to Do
+
+     Address all Critical Issues and Warnings identified in the review.
+     Make the minimal changes needed to resolve each issue.
+     Run tests after making changes to ensure nothing is broken.
+
+     ## Output
+
+     Report what changes were made to address each issue.
+   ```
+
+3. **Re-run code review**:
+   - After fixes are applied, invoke `regent-code-reviewer` again (same syntax as above)
+   - Repeat steps 1-3 until the review passes
+
+## Phase 6: Verification
 
 After code review passes:
 
@@ -225,7 +340,41 @@ If tests fail:
 - Re-run code review if changes were significant
 - Re-run tests
 
-## Phase 8: Commit and Push
+## Phase 6.5: Human Review
+
+**Check for `--auto-confirm` flag first.**
+
+### If `--auto-confirm` is set:
+Skip this phase entirely. Proceed directly to Phase 7 (Commit and Push).
+
+This flag is used by `/regent:execute-epic` for autonomous overnight execution.
+
+### If `--auto-confirm` is NOT set (default):
+
+**STOP HERE** - Do not proceed to commit until the user confirms.
+
+Present a summary of the work completed:
+```
+Task {N} implementation complete: {title}
+
+Changes made:
+- {list modified files}
+- {summary of key changes}
+
+Tests: {pass/fail status}
+Code review: Passed
+
+Ready to commit and close issue #{issue-number}?
+```
+
+**Wait for user confirmation** before proceeding to Phase 7.
+
+If the user requests changes:
+- Go back to Phase 4 (Implementation) with the requested modifications
+- Re-run code review (Phase 5) and verification (Phase 6)
+- Return here for another confirmation
+
+## Phase 7: Commit and Push
 
 Once verified:
 
@@ -246,100 +395,33 @@ Once verified:
    git push origin feature/{spec-name}
    ```
 
-## Phase 9: Pull Request Management
-
-### Check for Existing PR
-
-```bash
-PR_NUMBER=$(gh pr list --head "feature/{spec-name}" --state open --json number --jq '.[0].number')
-```
-
-### If No PR Exists (First Task)
-
-1. Read `tasks.md` to get all tasks for the PR body
-
-2. Create a draft PR:
+4. Close the issue (since we're using a single feature branch, we close manually):
    ```bash
-   gh pr create \
-     --title "{Spec Title}" \
-     --body "$(cat <<'EOF'
-   ## Overview
+   gh issue close {issue-number} --comment "✅ Task completed and merged to feature/{spec-name}
 
-   {Brief description from the spec's brainstorm.md or requirements.md}
+   Commit: $(git rev-parse HEAD)
 
-   ## Tasks
-
-   - [x] Task {N}: {title} (#issue-number)
-   - [ ] Task {N+1}: {title} (#issue-number)
-   - [ ] Task {N+2}: {title} (#issue-number)
-   ...
-
-   ## Requirements
-
-   See [{spec-name}/requirements.md]({requirements-url})
-
-   ## Design
-
-   See [{spec-name}/design.md]({design-url})
-
-   ---
-   *Managed by [Regent](https://github.com/stickystyle/regent)*
-   EOF
-   )" \
-     --draft
+   The changes will be included in the spec's pull request."
    ```
 
-3. Capture the new PR number for reporting
-
-### If PR Already Exists (Subsequent Tasks)
-
-1. Get current PR body:
-   ```bash
-   gh pr view $PR_NUMBER --json body --jq '.body'
-   ```
-
-2. Update the task checkbox in the PR body:
-   - Find the line matching `- [ ] Task {N}:`
-   - Replace with `- [x] Task {N}:`
-
-3. Update the PR:
-   ```bash
-   gh pr edit $PR_NUMBER --body "{updated body}"
-   ```
-
-4. Add a comment noting completion:
-   ```bash
-   gh pr comment $PR_NUMBER --body "✅ **Task {N} complete**: {title}
-
-   Commit: {commit-sha}
-   Issue: #{issue-number} (will close on merge)"
-   ```
-
-## Phase 10: Report Completion
+## Phase 8: Report Completion
 
 Report to user:
 ```
 Task {N} complete: {title}
 
 Branch: feature/{spec-name}
-Commit: {commit-sha}
-Issue: #{issue-number} (closes on merge)
-PR: {pr-url}
-
-Progress: {X}/{total} tasks complete
-
-{If all tasks complete}:
-All tasks complete! The PR is ready to be marked as "Ready for Review".
-Run: gh pr ready {pr-number}
+Issue: #{issue-number} (closed)
 ```
 
 ## Principles
 
 - **Shared branch**: All tasks for a spec work on `feature/{spec-name}`
-- **Single PR**: One PR per spec, updated as tasks complete
+- **Single PR**: One PR per spec, links to epic for progress tracking
+- **Epic tracking**: Task progress is visible via epic issue sub-issues
 - **Fresh context**: Codebase is explored at execution time, not planning time
 - **Incremental progress**: Tasks can build on each other without waiting for merges
-- **Traceability**: Issues close automatically when PR merges (via commit messages)
+- **Traceability**: Issues close when task is pushed to feature branch
 - **TDD**: Tests first, then implementation
 
 ## If Unclear

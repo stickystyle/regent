@@ -5,7 +5,7 @@
   "author": {
     "name": "Ryan Parrish"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0",
   "keywords": ["spec-driven", "tdd", "workflow", "development"],
   "commands": ["./plugin/commands/"],
   "agents": ["./plugin/agents/"]

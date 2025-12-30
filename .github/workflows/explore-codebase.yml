@@ -161,6 +161,7 @@ jobs:
               EXPLORATION_CONTEXT=$(jq -n \
                 --arg overview "$EXPLORATION_OUTPUT" \
                 '{
+                  file_tree: "Unable to generate - see project_overview for raw analysis",
                   project_overview: $overview,
                   architecture_summary: "Unable to parse structured output from Claude",
                   relevant_patterns: [],
