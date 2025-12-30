@@ -16,66 +16,7 @@ Autonomous serial execution of all tasks in a GitHub epic. Designed for overnigh
 
 ## Phase 0: Initialization
 
-### 0.1 Ensure Sandbox Settings
-
-Check `.claude/settings.local.json` for required sandbox configuration.
-
-**Required settings for autonomous execution:**
-- `sandbox.enabled` must be `true`
-- `sandbox.autoAllowBashIfSandboxed` must be `true`
-
-**Validation logic:**
-
-1. If file doesn't exist → create it with full config (below)
-2. If file exists → read and validate:
-   - If `sandbox.enabled !== true` → **WARN** and offer to add it
-   - If `sandbox.autoAllowBashIfSandboxed !== true` → **WARN** and offer to add it
-   - If both are correct → proceed silently
-
-**If creating new file, use this config:**
-
-```json
-{
-  "sandbox": {
-    "enabled": true,
-    "autoAllowBashIfSandboxed": true,
-    "network": {
-      "allowedHosts": [
-        "github.com",
-        "api.github.com",
-        "raw.githubusercontent.com"
-      ]
-    }
-  },
-  "permissions": {
-    "deny": [
-      "Read(.env)",
-      "Read(**/*secret*)",
-      "Read(**/*credential*)"
-    ]
-  }
-}
-```
-
-**If file exists but missing sandbox settings:**
-
-Report warning and ask user:
-```
-⚠️  Sandbox not configured for autonomous execution.
-
-Current .claude/settings.local.json is missing:
-- sandbox.enabled: true
-- sandbox.autoAllowBashIfSandboxed: true
-
-Without these settings, Claude will pause for permission prompts overnight.
-
-Add sandbox settings to enable autonomous execution?
-```
-
-If user confirms, merge the sandbox config into the existing file (preserving other settings).
-If user declines, warn that execution may pause on permission prompts but continue.
-
-### 0.2 Run Initialization Script
+### 0.1 Run Initialization Script
 
 ```bash
 plugin/scripts/init-execute-epic.sh {epic-number-or-url} [--dry-run]
@@ -90,7 +31,7 @@ This script handles:
 
 **If `--dry-run` flag was passed**: Display the dry run output and stop. Do not proceed to Phase 1.
 
-### 0.3 Report Initialization Results
+### 0.2 Report Initialization Results
 
 ```
 Executing Epic #{EPIC_NUM}: {EPIC_TITLE}
@@ -349,9 +290,8 @@ The command will automatically resume from Issue #{N}.
 
 For fully autonomous execution:
 
-1. **Sandbox settings**: Auto-created if missing, or pre-configure `.claude/settings.local.json`
-2. **GitHub CLI**: Authenticated with `gh auth login`
-3. **Claude CLI flags**:
+1. **GitHub CLI**: Authenticated with `gh auth login`
+2. **Claude CLI flags**:
    ```bash
    claude -p "/execute-epic 42" \
      --dangerously-skip-permissions \
