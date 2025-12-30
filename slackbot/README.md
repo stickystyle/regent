@@ -35,9 +35,8 @@ synthesized specs, and create GitHub Epic issues for tracking - all within Slack
 
 Before installing the Regent Slack Bot, ensure you have:
 
-- **[Deno](https://deno.land/)** >= 1.37.0 - The JavaScript/TypeScript runtime
-- **[Slack CLI](https://api.slack.com/automation/cli/install)** - For deploying to Slack's ROSI
-  platform
+- **[Deno](https://deno.com/)** >= 1.37.0 - The JavaScript/TypeScript runtime
+- **[Slack CLI](https://docs.slack.dev/tools/slack-cli/)** - For deploying to Slack's ROSI platform
 - **Anthropic API Key** - For Claude integration ([get one here](https://console.anthropic.com/))
 - **GitHub Personal Access Token** - For repository integration (requires `repo` scope)
 - **Slack Workspace** - With permission to install apps
@@ -57,7 +56,7 @@ irm https://deno.land/install.ps1 | iex
 brew install slack-cli
 
 # Install Slack CLI (other platforms)
-# See https://api.slack.com/automation/cli/install
+# See https://docs.slack.dev/tools/slack-cli/
 ```
 
 ### 2. Clone the Repository
@@ -259,6 +258,7 @@ deno task fmt
 
 ## Documentation
 
+- [Deployment Guide](docs/deployment.md) - Complete deployment and GitHub Actions setup
 - [User Guide](docs/user-guide.md) - How to use Regent effectively
 - [Troubleshooting](docs/troubleshooting.md) - Common issues and solutions
 - [Architecture Decision Records](docs/adr/) - Key design decisions
