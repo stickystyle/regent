@@ -1,0 +1,20 @@
+{
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "network": {
+      "allowedHosts": [
+        "github.com",
+        "api.github.com",
+        "raw.githubusercontent.com"
+      ]
+    }
+  },
+  "permissions": {
+    "deny": [
+      "Read(.env)",
+      "Read(**/*secret*)",
+      "Read(**/*credential*)"
+    ]
+  }
+}

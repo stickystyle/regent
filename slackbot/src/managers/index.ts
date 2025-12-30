@@ -1,0 +1,19 @@
+// ABOUTME: Central export for session management components.
+// ABOUTME: Provides SessionManager for persistence and MessageCache for in-memory storage.
+
+export { SessionManager } from "./session-manager.ts";
+export { MessageCache } from "./message-cache.ts";
+export type { DatastoreClient, DatastoreResponse } from "./datastore-client.ts";
+export { MockDatastoreClient } from "./datastore-client.ts";
+export type { CanvasManager } from "./canvas-manager.ts";
+export { CanvasManagerImpl, MockCanvasManager } from "./canvas-manager.ts";
+export type { EpicManager, SpecType } from "./epic-manager.ts";
+export {
+  EpicManagerImpl,
+  extractSpecContent,
+  formatSpecComment,
+  MockEpicManager,
+  parseSpecMarker,
+} from "./epic-manager.ts";
+export type { EnvProvider, SecretManager } from "./secret-manager.ts";
+export { defaultEnvProvider, MockSecretManager, SecretManagerImpl } from "./secret-manager.ts";

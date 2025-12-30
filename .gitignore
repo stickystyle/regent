@@ -8,3 +8,9 @@ slackbot/.slack/
 deno.lock
 
 .claude/aboutme-index.json
+
+# Regent execute-epic runtime state
+.regent/*/epic-progress.json
+.regent/*/epic-issues.json
+.regent/*/current-issue-body.md
+.regent/*/worker-*.log
