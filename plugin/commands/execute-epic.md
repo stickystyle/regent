@@ -100,7 +100,7 @@ ulimit -n 10240 && claude -p "/regent-execute-issue {issue_number} --auto-confir
   --plugin-dir . \
   --settings ".regent/worker-settings.json" \
   --dangerously-skip-permissions \
-  --max-turns 30 \
+  --max-turns 50 \
   --output-format json \
   --no-session-persistence \
   2>&1 | tee "{SPEC_DIR}/worker-{issue_number}.log"
@@ -112,7 +112,7 @@ ulimit -n 10240 && claude -p "/regent-execute-issue {issue_number} --auto-confir
 - `--plugin-dir .` - Load the regent plugin from current directory
 - `--settings` - Load worker-specific sandbox/permission settings (avoids modifying user's settings)
 - `--dangerously-skip-permissions` - No permission prompts
-- `--max-turns 30` - Limit per-issue work (prevents runaway)
+- `--max-turns 50` - Limit per-issue work (prevents runaway)
 - `--output-format json` - Structured output for parsing
 - `--no-session-persistence` - Workers are single-use, skip session file I/O
 - `--auto-confirm` - Flag to execute-issue to skip Phase 6.5 human confirmation
