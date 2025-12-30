@@ -20,7 +20,7 @@ const messageEventsTrigger: Trigger<typeof MessageEventWorkflow.definition> = {
   workflow: `#/workflows/${MessageEventWorkflow.definition.callback_id}`,
   event: {
     event_type: TriggerEventTypes.MessagePosted,
-    channel_ids: [], // All channels where app is installed
+    all_resources: true, // All channels where app is installed
     filter: {
       version: 1,
       root: {

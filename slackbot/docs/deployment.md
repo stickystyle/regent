@@ -102,11 +102,50 @@ slack deploy
 ```
 
 You'll be prompted to:
+
 1. Select your workspace
 2. Choose an app name (default: regent-slackbot)
 3. Confirm deployment
 
-### 1.4 Note Your App ID
+### 1.4 Create Triggers
+
+After deployment, you'll be prompted to create triggers. **Both triggers are required** for the app
+to function:
+
+```
+? Choose a trigger definition file:
+❱ triggers/brainstorm-command.ts
+  triggers/message-events.ts
+  Do not create a trigger
+```
+
+**Create both triggers:**
+
+1. Select `triggers/brainstorm-command.ts` and press Enter
+   - This creates the `/brainstorm` slash command
+
+2. Run `slack trigger create --trigger-def triggers/message-events.ts`
+   - This enables the bot to respond to messages in threads
+
+Alternatively, you can create triggers individually:
+
+```bash
+# Create the /brainstorm slash command
+slack trigger create --trigger-def triggers/brainstorm-command.ts
+
+# Create the message event handler
+slack trigger create --trigger-def triggers/message-events.ts
+```
+
+To verify triggers were created:
+
+```bash
+slack trigger list
+```
+
+You should see both triggers listed for your workspace.
+
+### 1.5 Note Your App ID
 
 After deployment, note your app ID (displayed in the output). You'll need this later.
 
