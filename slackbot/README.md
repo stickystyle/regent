@@ -160,13 +160,17 @@ For more details, see the [User Guide](docs/user-guide.md).
 
 The app requires these OAuth scopes (configured in `manifest.ts`):
 
+- `app_mentions:read` - Receive @regent mentions
+- `canvases:write` - Create and update Canvas documents
 - `channels:history` - Read channel messages
-- `channels:join` - Join public channels
 - `channels:read` - List channels
 - `chat:write` - Post messages
 - `commands` - Handle slash commands
+- `datastore:read` - Read session data
+- `datastore:write` - Write session data
 - `files:read` - Read shared files
 - `files:write` - Upload spec files
+- `users:read` - Get user information
 
 ### Outgoing Connections
 
