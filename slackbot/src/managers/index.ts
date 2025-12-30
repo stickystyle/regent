@@ -15,3 +15,5 @@ export {
   MockEpicManager,
   parseSpecMarker,
 } from "./epic-manager.ts";
+export type { EnvProvider, SecretManager } from "./secret-manager.ts";
+export { defaultEnvProvider, MockSecretManager, SecretManagerImpl } from "./secret-manager.ts";
