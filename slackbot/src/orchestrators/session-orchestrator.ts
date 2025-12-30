@@ -6,8 +6,13 @@ import type { GitHubClient } from "../clients/github-client.ts";
 import type { SlackMessagingClient } from "../clients/messaging-client.ts";
 import { BaseError, GitHubAccessError, ValidationError } from "../errors/types.ts";
 import type { CanvasManager } from "../managers/canvas-manager.ts";
+import type { EpicManager } from "../managers/epic-manager.ts";
 import type { MessageCache } from "../managers/message-cache.ts";
 import type { SessionManager } from "../managers/session-manager.ts";
+import {
+  type FinalizationDependencies,
+  handleFinalization,
+} from "../handlers/finalization-handler.ts";
 import type { Message } from "../types/message.ts";
 import type { RelevantFile, RepositoryContext } from "../types/repository-context.ts";
 import { Framework } from "../types/repository-context.ts";
@@ -43,6 +48,7 @@ export class SessionOrchestrator {
   private readonly messageCache: MessageCache | null;
   private readonly repositoryContextCache: Map<string, RepositoryContext>;
   private readonly canvasManager: CanvasManager | null;
+  private readonly epicManager: EpicManager | null;
 
   /**
    * Create a new SessionOrchestrator.
@@ -53,6 +59,7 @@ export class SessionOrchestrator {
    * @param messagingClient - Client for Slack message posting
    * @param messageCache - Optional message cache for conversation history
    * @param canvasManager - Optional Canvas manager for spec display during review
+   * @param epicManager - Optional Epic manager for GitHub Epic creation during finalization
    */
   constructor(
     sessionManager: SessionManager,
@@ -61,6 +68,7 @@ export class SessionOrchestrator {
     messagingClient: SlackMessagingClient,
     messageCache?: MessageCache,
     canvasManager?: CanvasManager,
+    epicManager?: EpicManager,
   ) {
     this.sessionManager = sessionManager;
     this.githubClient = githubClient;
@@ -69,6 +77,7 @@ export class SessionOrchestrator {
     this.messageCache = messageCache ?? null;
     this.repositoryContextCache = new Map();
     this.canvasManager = canvasManager ?? null;
+    this.epicManager = epicManager ?? null;
   }
 
   /**
@@ -1024,9 +1033,7 @@ export class SessionOrchestrator {
       // Check if any negation word appears in the 30 characters before the phrase
       // This handles cases like "I do not approve" or "don't approve"
       const recentContext = textBeforePhrase.slice(-30);
-      const hasNegation = negationWords.some((negation) =>
-        recentContext.includes(negation)
-      );
+      const hasNegation = negationWords.some((negation) => recentContext.includes(negation));
 
       if (!hasNegation) {
         return true;
@@ -1039,20 +1046,49 @@ export class SessionOrchestrator {
   /**
    * Handle approval of the spec.
    *
+   * If a repository is configured and all dependencies are available,
+   * this will create a GitHub Epic and store the spec as a comment.
+   * Otherwise, it will simply mark the session as finalized.
+   *
    * @param session - The active session
    * @param channelId - Slack channel ID
    * @param threadTs - Thread timestamp
    */
   private async handleApproval(
-    _session: Session,
+    session: Session,
     channelId: string,
     threadTs: string,
   ): Promise<void> {
-    // Post approval confirmation
+    // Check if we can perform full finalization (repo + all dependencies)
+    if (session.repository && this.canvasManager && this.epicManager) {
+      // Full finalization with Epic creation
+      const dependencies: FinalizationDependencies = {
+        sessionManager: this.sessionManager,
+        canvasManager: this.canvasManager,
+        epicManager: this.epicManager,
+        messagingClient: this.messagingClient,
+      };
+
+      const result = await handleFinalization(channelId, threadTs, dependencies);
+
+      if (!result.success) {
+        // Error message is already posted by handleFinalization
+        // Session remains in Review phase for retry
+        return;
+      }
+
+      // Success message with Epic URL is already posted by handleFinalization
+      return;
+    }
+
+    // No repository configured - simple finalization without Epic
+    session.phase = Phase.Finalized;
+    await this.sessionManager.updateSession(session);
+
     await this.messagingClient.postMessage(
       channelId,
       threadTs,
-      "Spec approved! Ready for finalization.",
+      "Spec finalized! Your Canvas/file is available for reference.",
     );
   }
 
@@ -1170,7 +1206,9 @@ export class SessionOrchestrator {
     }
 
     // Extract personas from "## User Personas" section
-    const personasMatch = markdown.match(/##\s+User\s+Personas\s*\n\n([\s\S]*?)(?=\n##(?!\s*#)|$)/i);
+    const personasMatch = markdown.match(
+      /##\s+User\s+Personas\s*\n\n([\s\S]*?)(?=\n##(?!\s*#)|$)/i,
+    );
     if (personasMatch) {
       spec.personas = this.parsePersonas(personasMatch[1]);
     }
