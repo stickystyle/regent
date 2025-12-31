@@ -4,6 +4,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { SlackMessagingClient } from "../clients/messaging-client.ts";
 import type { SessionManager } from "../managers/session-manager.ts";
+import type { SessionOrchestrator } from "../orchestrators/session-orchestrator.ts";
 import type { ExplorationCallback } from "../types/exploration-callback.ts";
 import { isExplorationSuccess } from "../types/exploration-callback.ts";
 import { parseSessionId, Phase } from "../types/session.ts";
@@ -56,6 +57,9 @@ export interface ExplorationHandlerDependencies {
 
   /** Secret for validating Authorization header */
   callbackSecret: string;
+
+  /** Optional orchestrator for generating first brainstorm question */
+  orchestrator?: SessionOrchestrator;
 }
 
 /**
@@ -241,6 +245,11 @@ export async function handleExplorationCallback(
   } else {
     const errorMessage = formatExplorationError(request.body);
     await messagingClient.postMessage(channelId, threadTs, errorMessage);
+  }
+
+  // Step 8: Generate first brainstorm question if orchestrator is available
+  if (dependencies.orchestrator) {
+    await dependencies.orchestrator.generateFirstQuestion(channelId, threadTs);
   }
 
   return {

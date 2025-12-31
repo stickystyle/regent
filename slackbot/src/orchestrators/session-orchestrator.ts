@@ -632,6 +632,44 @@ export class SessionOrchestrator {
   }
 
   /**
+   * Generate and post the first brainstorm question after exploration callback.
+   *
+   * Called by ExplorationHandler after storing exploration data and posting summary.
+   * Uses the stored exploration_data from the session to build repository context.
+   *
+   * @param channelId - Slack channel ID
+   * @param threadTs - Thread timestamp
+   */
+  async generateFirstQuestion(
+    channelId: string,
+    threadTs: string,
+  ): Promise<void> {
+    const session = await this.sessionManager.loadSession(channelId, threadTs);
+    if (!session) {
+      return;
+    }
+
+    // Build repository context from stored exploration_data
+    let repositoryContext: RepositoryContext | null = null;
+    if (session.exploration_data) {
+      try {
+        const explorationContext = JSON.parse(session.exploration_data) as ExplorationContext;
+        repositoryContext = this.convertExplorationContext(
+          explorationContext,
+          session.repository ?? "",
+        );
+        // Cache it for future use
+        const sessionId = `${channelId}:${threadTs}`;
+        this.repositoryContextCache.set(sessionId, repositoryContext);
+      } catch {
+        // If parsing fails, continue without context
+      }
+    }
+
+    await this.generateFirstQuestionFromCallback(session, channelId, threadTs, repositoryContext);
+  }
+
+  /**
    * Handle exploration result callback from GitHub Actions workflow.
    *
    * Flow:
