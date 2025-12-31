@@ -31,7 +31,7 @@ export const SessionsDatastore = DefineDatastore({
       type: Schema.types.string,
     },
     /**
-     * Current phase: "questioning", "review", or "finalized"
+     * Current phase: "initializing", "questioning", "review", or "finalized"
      */
     phase: {
       type: Schema.types.string,
@@ -84,6 +84,13 @@ export const SessionsDatastore = DefineDatastore({
      * Stored as JSON string: {"brainstorm":123,"requirements":456}
      */
     spec_comment_ids: {
+      type: Schema.types.string,
+    },
+    /**
+     * JSON-serialized exploration results from GitHub Actions (max 100KB).
+     * Contains file summaries and repository context for brainstorming.
+     */
+    exploration_data: {
       type: Schema.types.string,
     },
   },
