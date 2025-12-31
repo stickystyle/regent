@@ -146,6 +146,13 @@ describe("Manifest Configuration (Static Analysis)", () => {
       );
     });
 
+    it("should import ExplorationCallbackWorkflow", () => {
+      assertStringIncludes(
+        manifestContent,
+        "ExplorationCallbackWorkflow",
+      );
+    });
+
     it("should register workflows in manifest", () => {
       assertStringIncludes(
         manifestContent,
@@ -189,6 +196,13 @@ describe("ROSI Workflows (File Existence)", () => {
     assertExists(stat);
     assertEquals(stat.isFile, true);
   });
+
+  it("should have exploration-callback-workflow.ts workflow", async () => {
+    const filePath = new URL("exploration-callback-workflow.ts", workflowsDir);
+    const stat = await Deno.stat(filePath);
+    assertExists(stat);
+    assertEquals(stat.isFile, true);
+  });
 });
 
 describe("Triggers (File Existence)", () => {
@@ -203,6 +217,13 @@ describe("Triggers (File Existence)", () => {
 
   it("should have message-events.ts trigger", async () => {
     const filePath = new URL("message-events.ts", triggersDir);
+    const stat = await Deno.stat(filePath);
+    assertExists(stat);
+    assertEquals(stat.isFile, true);
+  });
+
+  it("should have exploration-callback.ts trigger", async () => {
+    const filePath = new URL("exploration-callback.ts", triggersDir);
     const stat = await Deno.stat(filePath);
     assertExists(stat);
     assertEquals(stat.isFile, true);
