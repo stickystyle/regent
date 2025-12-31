@@ -308,19 +308,15 @@ slack env add GITHUB_TOKEN
 
 # Shared secret for callback authentication (same as GitHub Actions)
 slack env add CALLBACK_SECRET
-
-# URL where exploration callbacks are received
-slack env add EXPLORATION_CALLBACK_URL
 ```
 
 ### Environment Variable Reference
 
-| Variable                   | Required | Description                                 |
-| -------------------------- | -------- | ------------------------------------------- |
-| `ANTHROPIC_API_KEY`        | Yes      | API key for Claude Messages API             |
-| `GITHUB_TOKEN`             | Yes      | GitHub PAT with `repo` scope                |
-| `CALLBACK_SECRET`          | Yes      | Must match GitHub Actions `CALLBACK_SECRET` |
-| `EXPLORATION_CALLBACK_URL` | Yes      | URL for receiving exploration results       |
+| Variable            | Required | Description                                 |
+| ------------------- | -------- | ------------------------------------------- |
+| `ANTHROPIC_API_KEY` | Yes      | API key for Claude Messages API             |
+| `GITHUB_TOKEN`      | Yes      | GitHub PAT with `repo` scope                |
+| `CALLBACK_SECRET`   | Yes      | Must match GitHub Actions `CALLBACK_SECRET` |
 
 ### 4.1 Verify Environment Variables
 
@@ -358,13 +354,6 @@ For sessions with a repository:
 3. After 1-3 minutes, exploration results are posted
 4. Bot begins asking questions
 
-If exploration is not configured, you'll see:
-
-```
-Exploration is not configured (missing EXPLORATION_CALLBACK_URL).
-I'll continue without repository context.
-```
-
 ## Troubleshooting
 
 ### Exploration Not Triggering
@@ -389,15 +378,16 @@ I'll continue without repository context.
 
 **Possible causes:**
 
-- `CALLBACK_SECRET` mismatch between GitHub and Slack
-- `EXPLORATION_CALLBACK_URL` is unreachable from GitHub Actions
-- Webhook endpoint is not processing requests correctly
+- `SLACK_WEBHOOK_TRIGGER_URL` GitHub secret is not set or incorrect
+- Webhook trigger was deleted or recreated (URL changed)
+- Network issues preventing GitHub Actions from reaching Slack
 
 **Resolution:**
 
-1. Verify both secrets match exactly
-2. Test callback URL is accessible publicly
-3. Check webhook service logs for errors
+1. Verify the `SLACK_WEBHOOK_TRIGGER_URL` secret is set correctly in GitHub
+2. Recreate the webhook trigger if needed: `slack trigger create --trigger-def triggers/exploration-callback.ts`
+3. Update the GitHub secret with the new webhook URL
+4. Check GitHub Actions workflow logs for callback errors
 
 ### Missing Environment Variables
 

@@ -30,7 +30,6 @@ describe("Exploration E2E Integration", () => {
   let anthropicClient: MockAnthropicClient;
   let messagingClient: MockSlackMessagingClient;
   let datastoreClient: MockDatastoreClient;
-  let originalCallbackUrl: string | undefined;
 
   const channelId = "C1234567890";
   const threadTs = "1234567890.123456";
@@ -39,10 +38,6 @@ describe("Exploration E2E Integration", () => {
   const callbackSecret = "test-callback-secret";
 
   beforeEach(() => {
-    // Save and set default callback URL for tests
-    originalCallbackUrl = Deno.env.get("EXPLORATION_CALLBACK_URL");
-    Deno.env.set("EXPLORATION_CALLBACK_URL", "https://example.com/callback");
-
     datastoreClient = new MockDatastoreClient();
     sessionManager = new SessionManager(datastoreClient);
     githubClient = new MockGitHubClient();
@@ -58,13 +53,6 @@ describe("Exploration E2E Integration", () => {
   });
 
   afterEach(() => {
-    // Restore original callback URL
-    if (originalCallbackUrl !== undefined) {
-      Deno.env.set("EXPLORATION_CALLBACK_URL", originalCallbackUrl);
-    } else {
-      Deno.env.delete("EXPLORATION_CALLBACK_URL");
-    }
-
     datastoreClient.clear();
     githubClient.clear();
     anthropicClient.clear();
@@ -191,7 +179,6 @@ describe("Exploration E2E Integration", () => {
       assertEquals(calls[0].targetRepo, "myorg/myrepo");
       assertEquals(calls[0].sessionId, sessionId);
       assertEquals(calls[0].idea, "add user authentication");
-      assertEquals(calls[0].callbackUrl, "https://example.com/callback");
     });
 
     it("should create session in Initializing phase when repo provided", async () => {
@@ -900,34 +887,6 @@ describe("Exploration E2E Integration", () => {
       assertExists(errorMessage, "Should post access error message");
     });
 
-    it("should handle missing EXPLORATION_CALLBACK_URL", async () => {
-      // Remove callback URL
-      Deno.env.delete("EXPLORATION_CALLBACK_URL");
-
-      anthropicClient.setNextQuestionResponse({
-        question: "What would you like to build?",
-        confidence_score: 15,
-      });
-
-      const command = createSlashCommand({
-        idea: "add feature",
-        repository: "owner/repo",
-      });
-      await orchestrator.handleSlashCommand(command, threadTs);
-
-      // Verify error message about configuration
-      const messages = messagingClient.getPostedMessages();
-      const configMessage = messages.find((m) =>
-        m.text.toLowerCase().includes("not configured") ||
-        m.text.toLowerCase().includes("callback")
-      );
-      assertExists(configMessage, "Should mention configuration issue");
-
-      // Session should still work (continues without exploration)
-      const session = await sessionManager.loadSession(channelId, threadTs);
-      assertExists(session);
-      assertEquals(session.phase, Phase.Questioning);
-    });
   });
 
   describe("Error code handling", () => {

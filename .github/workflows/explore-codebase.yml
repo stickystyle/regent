@@ -1,5 +1,5 @@
 # ABOUTME: GitHub Actions workflow for deep codebase exploration using Claude Code CLI.
-# ABOUTME: Triggered by workflow_dispatch, explores a target repo and POSTs results to callback URL.
+# ABOUTME: Triggered by workflow_dispatch, explores a target repo and POSTs results to Slack webhook.
 
 name: Explore Codebase
 
@@ -14,12 +14,8 @@ on:
         description: 'The idea/feature being brainstormed'
         required: true
         type: string
-      callback_url:
-        description: 'URL to POST results to'
-        required: true
-        type: string
       session_id:
-        description: 'Session ID for correlation'
+        description: 'Session ID for correlation (channel_id:thread_ts format)'
         required: true
         type: string
 
@@ -38,8 +34,8 @@ jobs:
         id: validate
         env:
           TARGET_REPO: ${{ inputs.target_repo }}
-          CALLBACK_URL: ${{ inputs.callback_url }}
           SESSION_ID: ${{ inputs.session_id }}
+          SLACK_WEBHOOK_TRIGGER_URL: ${{ secrets.SLACK_WEBHOOK_TRIGGER_URL }}
         run: |
           # Validate target_repo format (owner/repo, alphanumeric with dots, dashes, underscores)
           if ! [[ "$TARGET_REPO" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]; then
@@ -47,17 +43,29 @@ jobs:
             exit 1
           fi
 
-          # Validate callback_url is HTTPS
-          if ! [[ "$CALLBACK_URL" =~ ^https:// ]]; then
-            echo "::error::Invalid callback_url: must use HTTPS"
+          # Validate SLACK_WEBHOOK_TRIGGER_URL is set and uses HTTPS
+          if [ -z "$SLACK_WEBHOOK_TRIGGER_URL" ]; then
+            echo "::error::SLACK_WEBHOOK_TRIGGER_URL secret is not set"
+            exit 1
+          fi
+          if ! [[ "$SLACK_WEBHOOK_TRIGGER_URL" =~ ^https:// ]]; then
+            echo "::error::Invalid SLACK_WEBHOOK_TRIGGER_URL: must use HTTPS"
             exit 1
           fi
 
-          # Validate session_id is non-empty and alphanumeric (with dashes/underscores)
-          if ! [[ "$SESSION_ID" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-            echo "::error::Invalid session_id format"
+          # Validate session_id is in channel_id:thread_ts format
+          # channel_id is alphanumeric with optional underscores
+          # thread_ts is a numeric timestamp with a dot (e.g., 1234567890.123456)
+          if ! [[ "$SESSION_ID" =~ ^[A-Z0-9]+:[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid session_id format: must be 'channel_id:thread_ts' (e.g., C12345:1234567890.123456)"
             exit 1
           fi
+
+          # Extract channel_id and thread_ts for later steps
+          CHANNEL_ID="${SESSION_ID%%:*}"
+          THREAD_TS="${SESSION_ID#*:}"
+          echo "channel_id=$CHANNEL_ID" >> $GITHUB_OUTPUT
+          echo "thread_ts=$THREAD_TS" >> $GITHUB_OUTPUT
 
           echo "All inputs validated successfully"
 
@@ -137,9 +145,10 @@ jobs:
       - name: Parse and send success callback
         if: steps.explore.outcome == 'success'
         env:
-          CALLBACK_URL: ${{ inputs.callback_url }}
+          SLACK_WEBHOOK_TRIGGER_URL: ${{ secrets.SLACK_WEBHOOK_TRIGGER_URL }}
           SESSION_ID: ${{ inputs.session_id }}
-          CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CHANNEL_ID: ${{ steps.validate.outputs.channel_id }}
+          THREAD_TS: ${{ steps.validate.outputs.thread_ts }}
         run: |
           # Read the exploration output
           EXPLORATION_OUTPUT=$(cat "$GITHUB_WORKSPACE/exploration_output.txt")
@@ -178,8 +187,8 @@ jobs:
             fi
           fi
 
-          # Construct the callback payload
-          PAYLOAD=$(jq -n \
+          # Construct the inner ExplorationCallback payload (with session_id, status, exploration_context)
+          INNER_PAYLOAD=$(jq -n \
             --arg session_id "$SESSION_ID" \
             --argjson context "$EXPLORATION_CONTEXT" \
             '{
@@ -188,33 +197,71 @@ jobs:
               exploration_context: $context
             }')
 
-          echo "Sending success callback..."
+          # Construct the flat webhook payload with exploration_data as stringified JSON
+          PAYLOAD=$(jq -n \
+            --arg channel_id "$CHANNEL_ID" \
+            --arg thread_ts "$THREAD_TS" \
+            --arg exploration_data "$INNER_PAYLOAD" \
+            '{
+              channel_id: $channel_id,
+              thread_ts: $thread_ts,
+              exploration_data: $exploration_data
+            }')
 
-          # Retry logic for transient failures (up to 3 attempts)
+          echo "Sending success callback to webhook..."
+
+          # Retry logic: attempt 1, if fails wait 5s, attempt 2, if fails wait 10s, attempt 3
+          # HTTP 000 indicates curl connection failure or timeout - treat as retryable
           MAX_RETRIES=3
-          RETRY_DELAY=5
           for i in $(seq 1 $MAX_RETRIES); do
-            if curl -X POST "$CALLBACK_URL" \
+            # Store HTTP response code and body separately
+            HTTP_RESPONSE=$(curl -X POST "$SLACK_WEBHOOK_TRIGGER_URL" \
               -H "Content-Type: application/json" \
-              -H "Authorization: Bearer $CALLBACK_SECRET" \
               -d "$PAYLOAD" \
-              --fail --silent --show-error --max-time 30; then
-              echo "Callback sent successfully"
+              --silent --show-error --max-time 30 \
+              -w "\n%{http_code}" 2>&1) || true
+
+            # Extract HTTP code (last line) and body (everything else)
+            HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -n1)
+            HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+
+            # Check if we got a 2xx response (success)
+            if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+              echo "Callback sent successfully (HTTP $HTTP_CODE)"
               exit 0
             fi
-            echo "Callback attempt $i failed, retrying in ${RETRY_DELAY}s..."
-            sleep $RETRY_DELAY
+
+            echo "Callback attempt $i failed (HTTP $HTTP_CODE)"
+
+            # Only retry on 5xx errors or network timeouts (empty HTTP_CODE or connection errors)
+            if [[ "$HTTP_CODE" =~ ^5[0-9][0-9]$ ]] || [ -z "$HTTP_CODE" ] || [ "$HTTP_CODE" == "000" ]; then
+              if [ "$i" -lt "$MAX_RETRIES" ]; then
+                # Determine retry delay: 5s after first failure, 10s after second
+                if [ "$i" -eq 1 ]; then
+                  RETRY_DELAY=5
+                else
+                  RETRY_DELAY=10
+                fi
+                echo "Retrying in ${RETRY_DELAY}s..."
+                sleep $RETRY_DELAY
+              fi
+            else
+              # 4xx errors are not retryable
+              echo "::error::Non-retryable error (HTTP $HTTP_CODE): $HTTP_BODY"
+              exit 1
+            fi
           done
 
-          echo "::warning::Failed to send success callback after $MAX_RETRIES attempts"
+          echo "::error::Failed to send success callback after $MAX_RETRIES attempts"
           exit 1
 
       - name: Send error callback
         if: steps.clone.outcome == 'failure' || steps.install.outcome == 'failure' || steps.explore.outcome == 'failure'
         env:
-          CALLBACK_URL: ${{ inputs.callback_url }}
+          SLACK_WEBHOOK_TRIGGER_URL: ${{ secrets.SLACK_WEBHOOK_TRIGGER_URL }}
           SESSION_ID: ${{ inputs.session_id }}
-          CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+          CHANNEL_ID: ${{ steps.validate.outputs.channel_id }}
+          THREAD_TS: ${{ steps.validate.outputs.thread_ts }}
           CLONE_OUTCOME: ${{ steps.clone.outcome }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           CLONE_ERROR: ${{ steps.clone.outputs.clone_error }}
@@ -233,8 +280,8 @@ jobs:
             ERROR_CODE="EXPLORATION_FAILED"
           fi
 
-          # Construct error payload
-          PAYLOAD=$(jq -n \
+          # Construct the inner ExplorationCallback payload (with session_id, status, error)
+          INNER_PAYLOAD=$(jq -n \
             --arg session_id "$SESSION_ID" \
             --arg message "$ERROR_MESSAGE" \
             --arg code "$ERROR_CODE" \
@@ -247,22 +294,59 @@ jobs:
               }
             }')
 
-          echo "Sending error callback..."
+          # Construct the flat webhook payload with exploration_data as stringified JSON
+          PAYLOAD=$(jq -n \
+            --arg channel_id "$CHANNEL_ID" \
+            --arg thread_ts "$THREAD_TS" \
+            --arg exploration_data "$INNER_PAYLOAD" \
+            '{
+              channel_id: $channel_id,
+              thread_ts: $thread_ts,
+              exploration_data: $exploration_data
+            }')
 
-          # Retry logic for transient failures (up to 3 attempts)
+          echo "Sending error callback to webhook..."
+
+          # Retry logic: attempt 1, if fails wait 5s, attempt 2, if fails wait 10s, attempt 3
+          # HTTP 000 indicates curl connection failure or timeout - treat as retryable
           MAX_RETRIES=3
-          RETRY_DELAY=5
           for i in $(seq 1 $MAX_RETRIES); do
-            if curl -X POST "$CALLBACK_URL" \
+            # Store HTTP response code and body separately
+            HTTP_RESPONSE=$(curl -X POST "$SLACK_WEBHOOK_TRIGGER_URL" \
               -H "Content-Type: application/json" \
-              -H "Authorization: Bearer $CALLBACK_SECRET" \
               -d "$PAYLOAD" \
-              --fail --silent --show-error --max-time 30; then
-              echo "Error callback sent successfully"
+              --silent --show-error --max-time 30 \
+              -w "\n%{http_code}" 2>&1) || true
+
+            # Extract HTTP code (last line) and body (everything else)
+            HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -n1)
+            HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+
+            # Check if we got a 2xx response (success)
+            if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+              echo "Error callback sent successfully (HTTP $HTTP_CODE)"
               exit 0
             fi
-            echo "Callback attempt $i failed, retrying in ${RETRY_DELAY}s..."
-            sleep $RETRY_DELAY
+
+            echo "Callback attempt $i failed (HTTP $HTTP_CODE)"
+
+            # Only retry on 5xx errors or network timeouts (empty HTTP_CODE or connection errors)
+            if [[ "$HTTP_CODE" =~ ^5[0-9][0-9]$ ]] || [ -z "$HTTP_CODE" ] || [ "$HTTP_CODE" == "000" ]; then
+              if [ "$i" -lt "$MAX_RETRIES" ]; then
+                # Determine retry delay: 5s after first failure, 10s after second
+                if [ "$i" -eq 1 ]; then
+                  RETRY_DELAY=5
+                else
+                  RETRY_DELAY=10
+                fi
+                echo "Retrying in ${RETRY_DELAY}s..."
+                sleep $RETRY_DELAY
+              fi
+            else
+              # 4xx errors are not retryable
+              echo "::error::Non-retryable error (HTTP $HTTP_CODE): $HTTP_BODY"
+              exit 1
+            fi
           done
 
           echo "::warning::Failed to send error callback after $MAX_RETRIES attempts"

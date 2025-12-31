@@ -21,13 +21,8 @@ describe("SessionOrchestrator", () => {
   let anthropicClient: MockAnthropicClient;
   let messagingClient: MockSlackMessagingClient;
   let datastore: MockDatastoreClient;
-  let originalCallbackUrl: string | undefined;
 
   beforeEach(() => {
-    // Save and set default callback URL for tests that expect exploration to trigger
-    originalCallbackUrl = Deno.env.get("EXPLORATION_CALLBACK_URL");
-    Deno.env.set("EXPLORATION_CALLBACK_URL", "https://example.com/callback");
-
     datastore = new MockDatastoreClient();
     sessionManager = new SessionManager(datastore);
     githubClient = new MockGitHubClient();
@@ -43,13 +38,6 @@ describe("SessionOrchestrator", () => {
   });
 
   afterEach(() => {
-    // Restore original callback URL
-    if (originalCallbackUrl !== undefined) {
-      Deno.env.set("EXPLORATION_CALLBACK_URL", originalCallbackUrl);
-    } else {
-      Deno.env.delete("EXPLORATION_CALLBACK_URL");
-    }
-
     datastore.clear();
     githubClient.clear();
     anthropicClient.clear();

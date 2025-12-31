@@ -144,13 +144,11 @@ export interface GitHubClient {
    *
    * @param targetRepo - Repository to explore in owner/repo format
    * @param idea - The idea/feature being brainstormed
-   * @param callbackUrl - URL to POST results to
-   * @param sessionId - Session ID for correlation
+   * @param sessionId - Session ID for correlation (channel_id:thread_ts format)
    */
   triggerExploration(
     targetRepo: string,
     idea: string,
-    callbackUrl: string,
     sessionId: string,
   ): Promise<void>;
 }
@@ -178,7 +176,6 @@ export class MockGitHubClient implements GitHubClient {
   private triggerExplorationCalls: Array<{
     targetRepo: string;
     idea: string;
-    callbackUrl: string;
     sessionId: string;
   }> = [];
   private exploreRepositoryCalls: Array<{
@@ -312,7 +309,6 @@ export class MockGitHubClient implements GitHubClient {
   getTriggerExplorationCalls(): Array<{
     targetRepo: string;
     idea: string;
-    callbackUrl: string;
     sessionId: string;
   }> {
     return [...this.triggerExplorationCalls];
@@ -424,11 +420,10 @@ export class MockGitHubClient implements GitHubClient {
   triggerExploration(
     targetRepo: string,
     idea: string,
-    callbackUrl: string,
     sessionId: string,
   ): Promise<void> {
     // Record the call for test assertions
-    this.triggerExplorationCalls.push({ targetRepo, idea, callbackUrl, sessionId });
+    this.triggerExplorationCalls.push({ targetRepo, idea, sessionId });
 
     if (this.triggerExplorationError !== null) {
       return Promise.reject(this.triggerExplorationError);
@@ -1393,19 +1388,17 @@ export class GitHubClientImpl implements GitHubClient {
    *
    * Sends a workflow_dispatch event to the exploration service repository
    * which will clone and analyze the target repository, then POST results
-   * to the callback URL.
+   * to the webhook configured via SLACK_WEBHOOK_TRIGGER_URL secret.
    *
    * @param targetRepo - Repository to explore in owner/repo format
    * @param idea - The idea/feature being brainstormed
-   * @param callbackUrl - URL to POST results to
-   * @param sessionId - Session ID for correlation
+   * @param sessionId - Session ID for correlation (channel_id:thread_ts format)
    * @throws GitHubAccessError for authentication/permission errors
    * @throws GitHubRateLimitError when rate limited
    */
   async triggerExploration(
     targetRepo: string,
     idea: string,
-    callbackUrl: string,
     sessionId: string,
   ): Promise<void> {
     return await this.retryHandler.execute(async () => {
@@ -1423,7 +1416,6 @@ export class GitHubClientImpl implements GitHubClient {
           inputs: {
             target_repo: targetRepo,
             idea: idea,
-            callback_url: callbackUrl,
             session_id: sessionId,
           },
         },

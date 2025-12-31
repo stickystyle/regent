@@ -133,6 +133,9 @@ export class SessionOrchestrator {
    * Posts a status message and triggers the exploration workflow.
    * Does not wait for exploration to complete - webhook will continue the flow.
    *
+   * The webhook URL is configured as SLACK_WEBHOOK_TRIGGER_URL secret in GitHub,
+   * not passed from ROSI.
+   *
    * @param command - Parsed slash command
    * @param threadTs - Thread timestamp
    */
@@ -140,21 +143,6 @@ export class SessionOrchestrator {
     command: SlashCommand,
     threadTs: string,
   ): Promise<void> {
-    // Validate callback URL configuration
-    const callbackUrl = Deno.env.get("EXPLORATION_CALLBACK_URL") ?? "";
-    if (!callbackUrl) {
-      // Post configuration error and continue without exploration
-      await this.messagingClient.postMessage(
-        command.channelId,
-        threadTs,
-        "Exploration is not configured (missing EXPLORATION_CALLBACK_URL).\n\n" +
-          "I'll continue without repository context.",
-      );
-      await this.transitionToQuestioningPhase(command.channelId, threadTs);
-      await this.generateAndPostFirstQuestion(command, threadTs, null);
-      return;
-    }
-
     // Post "exploring" message
     await this.messagingClient.postMessage(
       command.channelId,
@@ -169,7 +157,6 @@ export class SessionOrchestrator {
       await this.githubClient.triggerExploration(
         command.repository!,
         command.idea ?? "",
-        callbackUrl,
         sessionId,
       );
     } catch (error) {

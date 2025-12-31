@@ -29,13 +29,7 @@ describe("SessionOrchestrator - Async Initialization", () => {
     ...overrides,
   });
 
-  let originalCallbackUrl: string | undefined;
-
   beforeEach(() => {
-    // Save and set default callback URL for tests that expect exploration to trigger
-    originalCallbackUrl = Deno.env.get("EXPLORATION_CALLBACK_URL");
-    Deno.env.set("EXPLORATION_CALLBACK_URL", "https://example.com/callback");
-
     datastore = new MockDatastoreClient();
     sessionManager = new SessionManager(datastore);
     githubClient = new MockGitHubClient();
@@ -51,13 +45,6 @@ describe("SessionOrchestrator - Async Initialization", () => {
   });
 
   afterEach(() => {
-    // Restore original callback URL
-    if (originalCallbackUrl !== undefined) {
-      Deno.env.set("EXPLORATION_CALLBACK_URL", originalCallbackUrl);
-    } else {
-      Deno.env.delete("EXPLORATION_CALLBACK_URL");
-    }
-
     datastore.clear();
     githubClient.clear();
     anthropicClient.clear();
@@ -248,119 +235,6 @@ describe("SessionOrchestrator - Async Initialization", () => {
     });
   });
 
-  describe("missing callback URL configuration", () => {
-    it("should post configuration error when EXPLORATION_CALLBACK_URL is not set", async () => {
-      // Ensure environment variable is not set
-      const originalCallbackUrl = Deno.env.get("EXPLORATION_CALLBACK_URL");
-      Deno.env.delete("EXPLORATION_CALLBACK_URL");
-
-      try {
-        const command = createSlashCommand({ repository: "owner/repo" });
-        const threadTs = "1234567890.123456";
-
-        anthropicClient.setNextQuestionResponse({
-          question: "What problem are you trying to solve?",
-          confidence_score: 20,
-        });
-
-        await orchestrator.handleSlashCommand(command, threadTs);
-
-        const messages = messagingClient.getPostedMessages();
-        const configMessage = messages.find((m) =>
-          m.text.toLowerCase().includes("not configured") ||
-          m.text.toLowerCase().includes("callback_url")
-        );
-        assertExists(configMessage);
-      } finally {
-        // Restore original value
-        if (originalCallbackUrl) {
-          Deno.env.set("EXPLORATION_CALLBACK_URL", originalCallbackUrl);
-        }
-      }
-    });
-
-    it("should transition to Questioning phase when callback URL is missing", async () => {
-      // Ensure environment variable is not set
-      const originalCallbackUrl = Deno.env.get("EXPLORATION_CALLBACK_URL");
-      Deno.env.delete("EXPLORATION_CALLBACK_URL");
-
-      try {
-        const command = createSlashCommand({ repository: "owner/repo" });
-        const threadTs = "1234567890.123456";
-
-        anthropicClient.setNextQuestionResponse({
-          question: "What problem are you trying to solve?",
-          confidence_score: 20,
-        });
-
-        await orchestrator.handleSlashCommand(command, threadTs);
-
-        const session = await sessionManager.loadSession(command.channelId, threadTs);
-        assertExists(session);
-        assertEquals(session.phase, Phase.Questioning);
-      } finally {
-        // Restore original value
-        if (originalCallbackUrl) {
-          Deno.env.set("EXPLORATION_CALLBACK_URL", originalCallbackUrl);
-        }
-      }
-    });
-
-    it("should generate first question when callback URL is missing", async () => {
-      // Ensure environment variable is not set
-      const originalCallbackUrl = Deno.env.get("EXPLORATION_CALLBACK_URL");
-      Deno.env.delete("EXPLORATION_CALLBACK_URL");
-
-      try {
-        const command = createSlashCommand({ repository: "owner/repo" });
-        const threadTs = "1234567890.123456";
-
-        anthropicClient.setNextQuestionResponse({
-          question: "What is the core problem you want to solve?",
-          confidence_score: 20,
-        });
-
-        await orchestrator.handleSlashCommand(command, threadTs);
-
-        // Should have called Anthropic API to generate first question
-        const conversations = anthropicClient.getConversationHistory();
-        assertEquals(conversations.length >= 1, true);
-      } finally {
-        // Restore original value
-        if (originalCallbackUrl) {
-          Deno.env.set("EXPLORATION_CALLBACK_URL", originalCallbackUrl);
-        }
-      }
-    });
-
-    it("should NOT trigger exploration workflow when callback URL is missing", async () => {
-      // Ensure environment variable is not set
-      const originalCallbackUrl = Deno.env.get("EXPLORATION_CALLBACK_URL");
-      Deno.env.delete("EXPLORATION_CALLBACK_URL");
-
-      try {
-        const command = createSlashCommand({ repository: "owner/repo" });
-        const threadTs = "1234567890.123456";
-
-        anthropicClient.setNextQuestionResponse({
-          question: "What problem are you trying to solve?",
-          confidence_score: 20,
-        });
-
-        await orchestrator.handleSlashCommand(command, threadTs);
-
-        // Should NOT have called triggerExploration
-        const calls = githubClient.getTriggerExplorationCalls();
-        assertEquals(calls.length, 0);
-      } finally {
-        // Restore original value
-        if (originalCallbackUrl) {
-          Deno.env.set("EXPLORATION_CALLBACK_URL", originalCallbackUrl);
-        }
-      }
-    });
-  });
-
   describe("slash command without --repo flag", () => {
     it("should create session in Questioning phase when no repo is provided", async () => {
       const command = createSlashCommand({ repository: undefined });
@@ -424,32 +298,6 @@ describe("SessionOrchestrator - Async Initialization", () => {
 
       const calls = githubClient.getTriggerExplorationCalls();
       assertEquals(calls.length, 0);
-    });
-  });
-
-  describe("callback URL configuration", () => {
-    it("should use EXPLORATION_CALLBACK_URL environment variable", async () => {
-      // Set environment variable
-      const originalCallbackUrl = Deno.env.get("EXPLORATION_CALLBACK_URL");
-      Deno.env.set("EXPLORATION_CALLBACK_URL", "https://example.com/webhook");
-
-      try {
-        const command = createSlashCommand({ repository: "owner/repo" });
-        const threadTs = "1234567890.123456";
-
-        await orchestrator.handleSlashCommand(command, threadTs);
-
-        const calls = githubClient.getTriggerExplorationCalls();
-        assertEquals(calls.length, 1);
-        assertEquals(calls[0].callbackUrl, "https://example.com/webhook");
-      } finally {
-        // Restore original value
-        if (originalCallbackUrl) {
-          Deno.env.set("EXPLORATION_CALLBACK_URL", originalCallbackUrl);
-        } else {
-          Deno.env.delete("EXPLORATION_CALLBACK_URL");
-        }
-      }
     });
   });
 });
