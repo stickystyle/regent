@@ -6,10 +6,15 @@ import type { SlackMessagingClient } from "../clients/messaging-client.ts";
 import type { SessionManager } from "../managers/session-manager.ts";
 import type { ExplorationCallback } from "../types/exploration-callback.ts";
 import { isExplorationSuccess } from "../types/exploration-callback.ts";
-import { parseSessionId } from "../types/session.ts";
+import { parseSessionId, Phase } from "../types/session.ts";
 
 // Re-export parseSessionId for backwards compatibility with existing imports
 export { parseSessionId } from "../types/session.ts";
+
+/**
+ * Maximum payload size in bytes (100KB).
+ */
+const MAX_PAYLOAD_SIZE_BYTES = 102400;
 
 /**
  * Request structure for the exploration callback handler.
@@ -154,9 +159,11 @@ function formatExplorationError(
  * Flow:
  * 1. Validate Authorization header matches CALLBACK_SECRET
  * 2. Parse session_id to extract channelId and threadTs
- * 3. Load session from SessionManager
- * 4. If success: post exploration summary to thread
- * 5. If error: post error message and offer to continue
+ * 3. Load session from SessionManager and validate phase
+ * 4. Validate payload size (max 100KB)
+ * 5. Store exploration_data and transition session to Questioning
+ * 6. If success: post exploration summary to thread
+ * 7. If error: post error message and offer to continue
  *
  * @param request - The incoming request with auth header and body
  * @param dependencies - Required service dependencies
@@ -192,16 +199,42 @@ export async function handleExplorationCallback(
   // Step 3: Load session
   const session = await sessionManager.loadSession(channelId, threadTs);
   if (!session) {
-    // Return 200 to prevent GitHub Actions retries, but log a warning
-    console.warn(`Session not found for callback: ${request.body.session_id}`);
     return {
-      status: 200,
-      ok: true,
-      message: "Session not found, callback ignored",
+      status: 404,
+      ok: false,
+      error: "Not Found: Session not found",
     };
   }
 
-  // Step 4/5: Handle success or error callback
+  // Step 3b: Validate session is in Initializing phase
+  if (session.phase !== Phase.Initializing) {
+    return {
+      status: 400,
+      ok: false,
+      error: "Bad Request: Session is not in Initializing state",
+    };
+  }
+
+  // Step 4: Validate payload size (100KB limit)
+  const explorationDataJson = JSON.stringify(
+    isExplorationSuccess(request.body)
+      ? request.body.exploration_context
+      : { error: request.body.error },
+  );
+  if (explorationDataJson.length > MAX_PAYLOAD_SIZE_BYTES) {
+    return {
+      status: 400,
+      ok: false,
+      error: "Bad Request: Payload exceeds 100KB limit",
+    };
+  }
+
+  // Step 5: Store exploration_data and transition to Questioning phase
+  session.exploration_data = explorationDataJson;
+  session.phase = Phase.Questioning;
+  await sessionManager.updateSession(session);
+
+  // Step 6/7: Handle success or error callback
   if (isExplorationSuccess(request.body)) {
     const summaryMessage = formatExplorationSummary(request.body);
     await messagingClient.postMessage(channelId, threadTs, summaryMessage);

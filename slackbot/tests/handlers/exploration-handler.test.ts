@@ -166,7 +166,7 @@ describe("Exploration Handler", () => {
 
     const createValidSession = (): Session => ({
       session_id: sessionId,
-      phase: Phase.Questioning,
+      phase: Phase.Initializing,
       initiator_user_id: "U123",
       confidence_score: 0,
       created_at: new Date().toISOString(),
@@ -305,7 +305,7 @@ describe("Exploration Handler", () => {
     });
 
     describe("session lookup", () => {
-      it("should return 200 with message for unknown session_id (prevents retries)", async () => {
+      it("should return 404 for non-existent sessions", async () => {
         // Do not set any session in the datastore
         const request: ExplorationHandlerRequest = {
           authorizationHeader: `Bearer ${callbackSecret}`,
@@ -314,14 +314,15 @@ describe("Exploration Handler", () => {
 
         const response = await handleExplorationCallback(request, dependencies);
 
-        // Returns 200 to prevent GitHub Actions retries
-        assertEquals(response.status, 200);
-        assertEquals(response.ok, true);
-        assertEquals(response.message, "Session not found, callback ignored");
+        assertEquals(response.status, 404);
+        assertEquals(response.ok, false);
+        assertEquals(response.error, "Not Found: Session not found");
       });
 
-      it("should process callback when session exists", async () => {
-        mockDatastore.setSession(createValidSession());
+      it("should process callback when session exists in Initializing state", async () => {
+        const session = createValidSession();
+        session.phase = Phase.Initializing;
+        mockDatastore.setSession(session);
         const request: ExplorationHandlerRequest = {
           authorizationHeader: `Bearer ${callbackSecret}`,
           body: createSuccessCallback(),
@@ -330,6 +331,77 @@ describe("Exploration Handler", () => {
         const response = await handleExplorationCallback(request, dependencies);
 
         assertEquals(response.status, 200);
+      });
+    });
+
+    describe("session phase validation", () => {
+      it("should return 400 for sessions in Questioning state", async () => {
+        const session = createValidSession();
+        session.phase = Phase.Questioning;
+        mockDatastore.setSession(session);
+        const request: ExplorationHandlerRequest = {
+          authorizationHeader: `Bearer ${callbackSecret}`,
+          body: createSuccessCallback(),
+        };
+
+        const response = await handleExplorationCallback(request, dependencies);
+
+        assertEquals(response.status, 400);
+        assertEquals(response.ok, false);
+        assertEquals(response.error, "Bad Request: Session is not in Initializing state");
+      });
+
+      it("should return 400 for sessions in Review state", async () => {
+        const session = createValidSession();
+        session.phase = Phase.Review;
+        mockDatastore.setSession(session);
+        const request: ExplorationHandlerRequest = {
+          authorizationHeader: `Bearer ${callbackSecret}`,
+          body: createSuccessCallback(),
+        };
+
+        const response = await handleExplorationCallback(request, dependencies);
+
+        assertEquals(response.status, 400);
+        assertEquals(response.ok, false);
+        assertEquals(response.error, "Bad Request: Session is not in Initializing state");
+      });
+
+      it("should return 400 for sessions in Finalized state", async () => {
+        const session = createValidSession();
+        session.phase = Phase.Finalized;
+        mockDatastore.setSession(session);
+        const request: ExplorationHandlerRequest = {
+          authorizationHeader: `Bearer ${callbackSecret}`,
+          body: createSuccessCallback(),
+        };
+
+        const response = await handleExplorationCallback(request, dependencies);
+
+        assertEquals(response.status, 400);
+        assertEquals(response.ok, false);
+        assertEquals(response.error, "Bad Request: Session is not in Initializing state");
+      });
+
+      it("should reject duplicate callbacks (session already processed)", async () => {
+        // First callback succeeds and transitions session to Questioning
+        const session = createValidSession();
+        session.phase = Phase.Initializing;
+        mockDatastore.setSession(session);
+
+        const request: ExplorationHandlerRequest = {
+          authorizationHeader: `Bearer ${callbackSecret}`,
+          body: createSuccessCallback(),
+        };
+
+        // First callback should succeed
+        const firstResponse = await handleExplorationCallback(request, dependencies);
+        assertEquals(firstResponse.status, 200);
+
+        // Second callback should fail (session is no longer Initializing)
+        const secondResponse = await handleExplorationCallback(request, dependencies);
+        assertEquals(secondResponse.status, 400);
+        assertEquals(secondResponse.error, "Bad Request: Session is not in Initializing state");
       });
     });
 
@@ -437,6 +509,115 @@ describe("Exploration Handler", () => {
           m.text.toLowerCase().includes("without")
         );
         assertExists(continueMessage);
+      });
+    });
+
+    describe("payload size validation", () => {
+      it("should accept payloads under 100KB", async () => {
+        mockDatastore.setSession(createValidSession());
+        // Create a payload just under 100KB
+        const largeContext = {
+          project_overview: "A".repeat(50000),
+          architecture_summary: "B".repeat(49000),
+        };
+        const callback: ExplorationCallbackSuccess = {
+          session_id: sessionId,
+          status: "success",
+          exploration_context: largeContext,
+        };
+        const request: ExplorationHandlerRequest = {
+          authorizationHeader: `Bearer ${callbackSecret}`,
+          body: callback,
+        };
+
+        const response = await handleExplorationCallback(request, dependencies);
+
+        assertEquals(response.status, 200);
+        assertEquals(response.ok, true);
+      });
+
+      it("should return 400 for payloads exceeding 100KB", async () => {
+        mockDatastore.setSession(createValidSession());
+        // Create a payload over 100KB (102400 bytes)
+        const largeContext = {
+          project_overview: "A".repeat(60000),
+          architecture_summary: "B".repeat(50000),
+        };
+        const callback: ExplorationCallbackSuccess = {
+          session_id: sessionId,
+          status: "success",
+          exploration_context: largeContext,
+        };
+        const request: ExplorationHandlerRequest = {
+          authorizationHeader: `Bearer ${callbackSecret}`,
+          body: callback,
+        };
+
+        const response = await handleExplorationCallback(request, dependencies);
+
+        assertEquals(response.status, 400);
+        assertEquals(response.ok, false);
+        assertEquals(response.error, "Bad Request: Payload exceeds 100KB limit");
+      });
+    });
+
+    describe("exploration data storage", () => {
+      it("should store exploration_data in session on success", async () => {
+        mockDatastore.setSession(createValidSession());
+        const callback = createSuccessCallback();
+        const request: ExplorationHandlerRequest = {
+          authorizationHeader: `Bearer ${callbackSecret}`,
+          body: callback,
+        };
+
+        await handleExplorationCallback(request, dependencies);
+
+        // Verify session was updated with exploration_data
+        const updatedSession = await mockDatastore.getSession(sessionId);
+        assertExists(updatedSession);
+        assertExists(updatedSession.exploration_data);
+        // Verify it's valid JSON
+        const parsed = JSON.parse(updatedSession.exploration_data);
+        assertEquals(parsed.project_overview, "A TypeScript project");
+      });
+
+      it("should transition session from Initializing to Questioning", async () => {
+        const session = createValidSession();
+        assertEquals(session.phase, Phase.Initializing);
+        mockDatastore.setSession(session);
+
+        const request: ExplorationHandlerRequest = {
+          authorizationHeader: `Bearer ${callbackSecret}`,
+          body: createSuccessCallback(),
+        };
+
+        await handleExplorationCallback(request, dependencies);
+
+        const updatedSession = await mockDatastore.getSession(sessionId);
+        assertExists(updatedSession);
+        assertEquals(updatedSession.phase, Phase.Questioning);
+      });
+
+      it("should store exploration_data on error callback too", async () => {
+        mockDatastore.setSession(createValidSession());
+        const callback = createErrorCallback();
+        const request: ExplorationHandlerRequest = {
+          authorizationHeader: `Bearer ${callbackSecret}`,
+          body: callback,
+        };
+
+        await handleExplorationCallback(request, dependencies);
+
+        // Session should still transition (exploration failed but we continue)
+        const updatedSession = await mockDatastore.getSession(sessionId);
+        assertExists(updatedSession);
+        assertEquals(updatedSession.phase, Phase.Questioning);
+        // Verify error information is stored in exploration_data
+        assertExists(updatedSession.exploration_data);
+        const parsedData = JSON.parse(updatedSession.exploration_data);
+        assertExists(parsedData.error);
+        assertEquals(parsedData.error.message, "Failed to clone repository");
+        assertEquals(parsedData.error.code, "CLONE_FAILED");
       });
     });
 

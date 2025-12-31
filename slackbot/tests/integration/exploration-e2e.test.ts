@@ -788,10 +788,10 @@ describe("Exploration E2E Integration", () => {
 
       const response = await handleExplorationCallback(request, createHandlerDependencies());
 
-      // Should return 200 to prevent retries, but session not found
-      assertEquals(response.status, 200);
-      assertEquals(response.ok, true);
-      assertEquals(response.message, "Session not found, callback ignored");
+      // Should return 404 for unknown sessions per Requirement 3.2
+      assertEquals(response.status, 404);
+      assertEquals(response.ok, false);
+      assertEquals(response.error, "Not Found: Session not found");
     });
   });
 
