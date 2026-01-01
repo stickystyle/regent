@@ -109,6 +109,17 @@ export interface Session {
     requirements?: number;
     design?: number;
   };
+
+  /**
+   * JSON string containing exploration results from GitHub Actions (max 100KB).
+   *
+   * Contains file summaries, repository structure, and other codebase context
+   * collected during the async exploration phase. Stored as a JSON string
+   * to work with Slack Datastore's string-only attribute types.
+   *
+   * Example: '{"files":["src/index.ts"],"summaries":{"src/index.ts":"Entry point"}}'
+   */
+  exploration_data?: string;
 }
 
 /**

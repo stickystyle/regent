@@ -3216,8 +3216,7 @@ describe("Property 8: PR Creation Conditional", () => {
     await client.triggerExploration(
       "target-owner/target-repo",
       "Add a feature",
-      "https://callback.example.com",
-      "session-123",
+      "C12345:1234567890.123456",
     );
 
     // Verify the URL uses the custom exploration service repo
@@ -3262,8 +3261,7 @@ describe("Property 8: PR Creation Conditional", () => {
     await client.triggerExploration(
       "target/repo",
       "idea",
-      "https://callback.com",
-      "session",
+      "C67890:1234567890.654321",
     );
 
     // Verify the URL is correctly formed with owner and repo

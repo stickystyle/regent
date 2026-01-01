@@ -133,6 +133,10 @@ export class SessionOrchestrator {
    * Posts a status message and triggers the exploration workflow.
    * Does not wait for exploration to complete - webhook will continue the flow.
    *
+   * The callback URL is read from EXPLORATION_CALLBACK_URL environment variable
+   * and passed to the workflow. If not configured (or empty), the workflow will
+   * fall back to using the SLACK_WEBHOOK_TRIGGER_URL secret.
+   *
    * @param command - Parsed slash command
    * @param threadTs - Thread timestamp
    */
@@ -140,21 +144,6 @@ export class SessionOrchestrator {
     command: SlashCommand,
     threadTs: string,
   ): Promise<void> {
-    // Validate callback URL configuration
-    const callbackUrl = Deno.env.get("EXPLORATION_CALLBACK_URL") ?? "";
-    if (!callbackUrl) {
-      // Post configuration error and continue without exploration
-      await this.messagingClient.postMessage(
-        command.channelId,
-        threadTs,
-        "Exploration is not configured (missing EXPLORATION_CALLBACK_URL).\n\n" +
-          "I'll continue without repository context.",
-      );
-      await this.transitionToQuestioningPhase(command.channelId, threadTs);
-      await this.generateAndPostFirstQuestion(command, threadTs, null);
-      return;
-    }
-
     // Post "exploring" message
     await this.messagingClient.postMessage(
       command.channelId,
@@ -166,11 +155,21 @@ export class SessionOrchestrator {
     try {
       const sessionId = formatSessionId(command.channelId, threadTs);
 
+      // Read callback URL from environment - this is a secret, never log it
+      // Treat empty string as not configured (same as undefined)
+      const rawCallbackUrl = Deno.env.get("EXPLORATION_CALLBACK_URL");
+      const callbackUrl = rawCallbackUrl?.trim() || undefined;
+
+      // Validate URL format if provided
+      if (callbackUrl !== undefined) {
+        this.validateCallbackUrl(callbackUrl);
+      }
+
       await this.githubClient.triggerExploration(
         command.repository!,
         command.idea ?? "",
-        callbackUrl,
         sessionId,
+        callbackUrl,
       );
     } catch (error) {
       // Handle trigger failure gracefully - posts error message and continues without context
@@ -179,6 +178,36 @@ export class SessionOrchestrator {
       // Continue with questioning flow despite the error
       await this.transitionToQuestioningPhase(command.channelId, threadTs);
       await this.generateAndPostFirstQuestion(command, threadTs, null);
+    }
+  }
+
+  /**
+   * Validate callback URL format.
+   *
+   * Ensures the URL is a valid HTTPS URL to prevent workflow failures
+   * due to malformed or insecure URLs.
+   *
+   * @param url - The callback URL to validate
+   * @throws ValidationError if URL is malformed or not HTTPS
+   */
+  private validateCallbackUrl(url: string): void {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      throw new ValidationError(
+        "Invalid callback URL format",
+        "EXPLORATION_CALLBACK_URL is not a valid URL",
+        "Update EXPLORATION_CALLBACK_URL in environment with a valid HTTPS URL",
+      );
+    }
+
+    if (parsedUrl.protocol !== "https:") {
+      throw new ValidationError(
+        "Callback URL must use HTTPS",
+        "EXPLORATION_CALLBACK_URL must use https: protocol",
+        "Update EXPLORATION_CALLBACK_URL to use HTTPS protocol",
+      );
     }
   }
 
@@ -629,6 +658,44 @@ export class SessionOrchestrator {
    */
   private getRepositoryContext(session: Session): RepositoryContext | null {
     return this.repositoryContextCache.get(session.session_id) ?? null;
+  }
+
+  /**
+   * Generate and post the first brainstorm question after exploration callback.
+   *
+   * Called by ExplorationHandler after storing exploration data and posting summary.
+   * Uses the stored exploration_data from the session to build repository context.
+   *
+   * @param channelId - Slack channel ID
+   * @param threadTs - Thread timestamp
+   */
+  async generateFirstQuestion(
+    channelId: string,
+    threadTs: string,
+  ): Promise<void> {
+    const session = await this.sessionManager.loadSession(channelId, threadTs);
+    if (!session) {
+      return;
+    }
+
+    // Build repository context from stored exploration_data
+    let repositoryContext: RepositoryContext | null = null;
+    if (session.exploration_data) {
+      try {
+        const explorationContext = JSON.parse(session.exploration_data) as ExplorationContext;
+        repositoryContext = this.convertExplorationContext(
+          explorationContext,
+          session.repository ?? "",
+        );
+        // Cache it for future use
+        const sessionId = `${channelId}:${threadTs}`;
+        this.repositoryContextCache.set(sessionId, repositoryContext);
+      } catch {
+        // If parsing fails, continue without context
+      }
+    }
+
+    await this.generateFirstQuestionFromCallback(session, channelId, threadTs, repositoryContext);
   }
 
   /**

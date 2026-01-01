@@ -2078,4 +2078,207 @@ describe("SessionManager", () => {
       assertEquals(loadedSession?.epic_number, 42);
     });
   });
+
+  describe("Property 7: Backwards Compatibility", () => {
+    it("should load sessions created before exploration_data field existed", async () => {
+      // Arrange - Simulate a session created before exploration_data was added
+      // by creating a session without the field
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "owner/repo",
+        "U1234567890",
+      );
+
+      // Session should not have exploration_data by default
+      assertEquals(session.exploration_data, undefined);
+
+      // Act - Load the session
+      const loadedSession = await sessionManager.loadSession(
+        channelId,
+        threadTs,
+      );
+
+      // Assert - Session loads correctly without exploration_data
+      assertExists(loadedSession);
+      assertEquals(loadedSession!.session_id, session.session_id);
+      assertEquals(loadedSession!.phase, Phase.Questioning);
+      assertEquals(loadedSession!.exploration_data, undefined);
+    });
+
+    it("should update sessions without exploration_data to add exploration_data", async () => {
+      // Arrange - Create session without exploration_data (legacy session)
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "owner/repo",
+        "U1234567890",
+      );
+
+      // Verify no exploration_data initially
+      assertEquals(session.exploration_data, undefined);
+
+      // Act - Add exploration_data to the session
+      const explorationData = JSON.stringify({
+        files: ["src/main.ts"],
+        summaries: { "src/main.ts": "Main entry point" },
+      });
+      session.exploration_data = explorationData;
+      await sessionManager.updateSession(session);
+
+      // Assert - Session now has exploration_data
+      const loadedSession = await sessionManager.loadSession(
+        channelId,
+        threadTs,
+      );
+      assertExists(loadedSession);
+      assertEquals(loadedSession!.exploration_data, explorationData);
+    });
+
+    it("should preserve exploration_data through session lifecycle", async () => {
+      // Arrange - Create session and add exploration_data
+      const channelId = "C1234567890";
+      const threadTs = "1234567890.123456";
+      const explorationData = JSON.stringify({
+        files: ["src/index.ts", "src/utils.ts"],
+        summaries: {
+          "src/index.ts": "Entry point",
+          "src/utils.ts": "Utility functions",
+        },
+      });
+
+      const session = await sessionManager.createSession(
+        channelId,
+        threadTs,
+        "owner/repo",
+        "U1234567890",
+      );
+
+      session.exploration_data = explorationData;
+      await sessionManager.updateSession(session);
+
+      // Act - Update phase and other fields
+      session.phase = Phase.Review;
+      session.canvas_id = "F1234567890";
+      session.confidence_score = 85;
+      await sessionManager.updateSession(session);
+
+      // Assert - exploration_data is preserved
+      const loadedSession = await sessionManager.loadSession(
+        channelId,
+        threadTs,
+      );
+      assertExists(loadedSession);
+      assertEquals(loadedSession!.phase, Phase.Review);
+      assertEquals(loadedSession!.canvas_id, "F1234567890");
+      assertEquals(loadedSession!.confidence_score, 85);
+      assertEquals(loadedSession!.exploration_data, explorationData);
+
+      // Verify the JSON is still valid
+      const parsed = JSON.parse(loadedSession!.exploration_data!);
+      assertEquals(parsed.files.length, 2);
+    });
+
+    it("should isolate exploration_data between concurrent sessions", async () => {
+      // Arrange - Create two sessions with different exploration_data
+      const session1 = await sessionManager.createSession(
+        "C1111111111",
+        "1111111111.111111",
+        "owner/repo1",
+        "U1111111111",
+      );
+      const session2 = await sessionManager.createSession(
+        "C2222222222",
+        "2222222222.222222",
+        "owner/repo2",
+        "U2222222222",
+      );
+
+      // Set different exploration_data for each session
+      session1.exploration_data = JSON.stringify({ files: ["repo1/file.ts"] });
+      session2.exploration_data = JSON.stringify({ files: ["repo2/file.ts"] });
+
+      await sessionManager.updateSession(session1);
+      await sessionManager.updateSession(session2);
+
+      // Act - Load both sessions
+      const loaded1 = await sessionManager.loadSession(
+        "C1111111111",
+        "1111111111.111111",
+      );
+      const loaded2 = await sessionManager.loadSession(
+        "C2222222222",
+        "2222222222.222222",
+      );
+
+      // Assert - Each session has its own exploration_data
+      assertExists(loaded1);
+      assertExists(loaded2);
+
+      const parsed1 = JSON.parse(loaded1!.exploration_data!);
+      const parsed2 = JSON.parse(loaded2!.exploration_data!);
+
+      assertEquals(parsed1.files[0], "repo1/file.ts");
+      assertEquals(parsed2.files[0], "repo2/file.ts");
+    });
+
+    it("should handle mixed sessions with and without exploration_data", async () => {
+      // Arrange - Create three sessions: with exploration_data, without, and with
+      const session1 = await sessionManager.createSession(
+        "C1111111111",
+        "1111111111.111111",
+        "owner/repo1",
+        "U1111111111",
+      );
+      // Create session2 without storing reference - we'll load it later to verify
+      await sessionManager.createSession(
+        "C2222222222",
+        "2222222222.222222",
+        "owner/repo2",
+        "U2222222222",
+      );
+      const session3 = await sessionManager.createSession(
+        "C3333333333",
+        "3333333333.333333",
+        "owner/repo3",
+        "U3333333333",
+      );
+
+      // Only set exploration_data on session1 and session3
+      session1.exploration_data = JSON.stringify({ files: ["file1.ts"] });
+      session3.exploration_data = JSON.stringify({ files: ["file3.ts"] });
+
+      await sessionManager.updateSession(session1);
+      await sessionManager.updateSession(session3);
+
+      // Act - Load all sessions
+      const loaded1 = await sessionManager.loadSession(
+        "C1111111111",
+        "1111111111.111111",
+      );
+      const loaded2 = await sessionManager.loadSession(
+        "C2222222222",
+        "2222222222.222222",
+      );
+      const loaded3 = await sessionManager.loadSession(
+        "C3333333333",
+        "3333333333.333333",
+      );
+
+      // Assert
+      assertExists(loaded1);
+      assertExists(loaded2);
+      assertExists(loaded3);
+
+      assertExists(loaded1!.exploration_data);
+      assertEquals(loaded2!.exploration_data, undefined);
+      assertExists(loaded3!.exploration_data);
+    });
+  });
 });

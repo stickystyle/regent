@@ -5,12 +5,14 @@ import { Manifest } from "deno-slack-sdk/mod.ts";
 import { SessionsDatastore } from "./src/datastores/sessions.ts";
 import { SlashCommandWorkflow } from "./workflows/slash-command-workflow.ts";
 import { MessageEventWorkflow } from "./workflows/message-event-workflow.ts";
+import { ExplorationCallbackWorkflow } from "./workflows/exploration-callback-workflow.ts";
+import { ExplorationTimeoutWorkflow } from "./workflows/exploration-timeout-workflow.ts";
 
 export default Manifest({
   name: "regent-slackbot",
   description: "Collaborative specification development through conversational AI in Slack",
   icon: "assets/icon.png",
-  workflows: [SlashCommandWorkflow, MessageEventWorkflow],
+  workflows: [SlashCommandWorkflow, MessageEventWorkflow, ExplorationCallbackWorkflow, ExplorationTimeoutWorkflow],
   datastores: [SessionsDatastore],
   outgoingDomains: ["api.anthropic.com", "api.github.com"],
   botScopes: [

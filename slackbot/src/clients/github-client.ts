@@ -142,16 +142,20 @@ export interface GitHubClient {
   /**
    * Trigger exploration workflow in regent-exploration-service via workflow_dispatch.
    *
+   * SECURITY: The callbackUrl parameter contains a secret webhook URL that must
+   * never be logged, included in error messages, or exposed in any way. This URL
+   * provides authenticated access to the Slack webhook trigger endpoint.
+   *
    * @param targetRepo - Repository to explore in owner/repo format
    * @param idea - The idea/feature being brainstormed
-   * @param callbackUrl - URL to POST results to
-   * @param sessionId - Session ID for correlation
+   * @param sessionId - Session ID for correlation (channel_id:thread_ts format)
+   * @param callbackUrl - Optional webhook URL for exploration results callback (SECRET - do not log)
    */
   triggerExploration(
     targetRepo: string,
     idea: string,
-    callbackUrl: string,
     sessionId: string,
+    callbackUrl?: string,
   ): Promise<void>;
 }
 
@@ -178,8 +182,8 @@ export class MockGitHubClient implements GitHubClient {
   private triggerExplorationCalls: Array<{
     targetRepo: string;
     idea: string;
-    callbackUrl: string;
     sessionId: string;
+    callbackUrl?: string;
   }> = [];
   private exploreRepositoryCalls: Array<{
     owner: string;
@@ -312,8 +316,8 @@ export class MockGitHubClient implements GitHubClient {
   getTriggerExplorationCalls(): Array<{
     targetRepo: string;
     idea: string;
-    callbackUrl: string;
     sessionId: string;
+    callbackUrl?: string;
   }> {
     return [...this.triggerExplorationCalls];
   }
@@ -424,11 +428,11 @@ export class MockGitHubClient implements GitHubClient {
   triggerExploration(
     targetRepo: string,
     idea: string,
-    callbackUrl: string,
     sessionId: string,
+    callbackUrl?: string,
   ): Promise<void> {
     // Record the call for test assertions
-    this.triggerExplorationCalls.push({ targetRepo, idea, callbackUrl, sessionId });
+    this.triggerExplorationCalls.push({ targetRepo, idea, sessionId, callbackUrl });
 
     if (this.triggerExplorationError !== null) {
       return Promise.reject(this.triggerExplorationError);
@@ -1393,20 +1397,20 @@ export class GitHubClientImpl implements GitHubClient {
    *
    * Sends a workflow_dispatch event to the exploration service repository
    * which will clone and analyze the target repository, then POST results
-   * to the callback URL.
+   * to the provided callback URL (or fall back to SLACK_WEBHOOK_TRIGGER_URL secret).
    *
    * @param targetRepo - Repository to explore in owner/repo format
    * @param idea - The idea/feature being brainstormed
-   * @param callbackUrl - URL to POST results to
-   * @param sessionId - Session ID for correlation
+   * @param sessionId - Session ID for correlation (channel_id:thread_ts format)
+   * @param callbackUrl - Optional webhook URL for exploration results callback
    * @throws GitHubAccessError for authentication/permission errors
    * @throws GitHubRateLimitError when rate limited
    */
   async triggerExploration(
     targetRepo: string,
     idea: string,
-    callbackUrl: string,
     sessionId: string,
+    callbackUrl?: string,
   ): Promise<void> {
     return await this.retryHandler.execute(async () => {
       // Parse the exploration service repository from configuration
@@ -1416,16 +1420,22 @@ export class GitHubClientImpl implements GitHubClient {
       const url =
         `${this.baseUrl}/repos/${explorationOwner}/${explorationRepo}/actions/workflows/${workflowId}/dispatches`;
 
+      // Build inputs - only include callback_url if provided
+      const inputs: Record<string, string> = {
+        target_repo: targetRepo,
+        idea: idea,
+        session_id: sessionId,
+      };
+
+      if (callbackUrl) {
+        inputs.callback_url = callbackUrl;
+      }
+
       const response = await this.githubApi.post(
         url,
         {
           ref: "main",
-          inputs: {
-            target_repo: targetRepo,
-            idea: idea,
-            callback_url: callbackUrl,
-            session_id: sessionId,
-          },
+          inputs,
         },
         this.getHeaders(),
       );

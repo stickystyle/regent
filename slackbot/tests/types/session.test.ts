@@ -382,4 +382,97 @@ describe("Session Type", () => {
       assertEquals(session.spec_comment_ids, undefined);
     });
   });
+
+  describe("Exploration data fields", () => {
+    it("should allow optional exploration_data field with valid JSON string", () => {
+      const explorationData = JSON.stringify({
+        files: ["src/index.ts", "src/types/session.ts"],
+        summaries: {
+          "src/index.ts": "Entry point for the application",
+          "src/types/session.ts": "Session type definitions",
+        },
+        timestamp: "2025-01-01T00:00:00.000Z",
+      });
+
+      const session: Session = {
+        session_id: "C1234567890:1234567890.123456",
+        phase: Phase.Initializing,
+        initiator_user_id: "U1234567890",
+        confidence_score: 0,
+        created_at: new Date().toISOString(),
+        ttl: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        exploration_data: explorationData,
+      };
+
+      assertEquals(session.exploration_data, explorationData);
+
+      // Verify the JSON can be parsed back
+      const parsed = JSON.parse(session.exploration_data!);
+      assertEquals(parsed.files.length, 2);
+      assertEquals(parsed.summaries["src/index.ts"], "Entry point for the application");
+    });
+
+    it("should work without exploration_data field (backwards compatibility)", () => {
+      const session: Session = {
+        session_id: "C1234567890:1234567890.123456",
+        phase: Phase.Questioning,
+        initiator_user_id: "U1234567890",
+        confidence_score: 50,
+        created_at: new Date().toISOString(),
+        ttl: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      };
+
+      assertEquals(session.exploration_data, undefined);
+    });
+
+    it("should allow exploration_data with large JSON payload near 100KB limit", () => {
+      // Create a payload approaching the 100KB limit (per Requirement 2.3)
+      // Actual size validation is done in ExplorationCallbackFunction, not here
+      // This test verifies the Session type can hold payloads at the expected boundary
+      const targetSizeBytes = 95 * 1024; // ~95KB target
+      const fileCount = 200;
+
+      // Build a base payload
+      const largePayload = {
+        files: Array(fileCount).fill(null).map((_, i) => `src/deeply/nested/path/file${i}.ts`),
+        summaries: Object.fromEntries(
+          Array(fileCount).fill(null).map((_, i) => [
+            `src/deeply/nested/path/file${i}.ts`,
+            `Detailed summary for file ${i}: This file contains important business logic ` +
+              `for handling user requests and processing data. It includes error handling, ` +
+              `validation, and integration with external services. The code follows best ` +
+              `practices and includes comprehensive documentation.`,
+          ]),
+        ),
+        padding: "", // Will be filled to reach target size
+      };
+
+      // Calculate current size and add padding to reach ~95KB
+      const baseSize = JSON.stringify(largePayload).length;
+      const paddingNeeded = Math.max(0, targetSizeBytes - baseSize - 20); // -20 for JSON overhead
+      largePayload.padding = "x".repeat(paddingNeeded);
+
+      const explorationData = JSON.stringify(largePayload);
+
+      // Verify we're testing near the boundary (between 90KB and 100KB)
+      const sizeKB = explorationData.length / 1024;
+      if (sizeKB < 90 || sizeKB > 100) {
+        throw new Error(`Test payload size ${sizeKB.toFixed(1)}KB not in expected range 90-100KB`);
+      }
+
+      const session: Session = {
+        session_id: "C1234567890:1234567890.123456",
+        phase: Phase.Initializing,
+        initiator_user_id: "U1234567890",
+        confidence_score: 0,
+        created_at: new Date().toISOString(),
+        ttl: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        exploration_data: explorationData,
+      };
+
+      assertExists(session.exploration_data);
+      const parsed = JSON.parse(session.exploration_data!);
+      assertEquals(parsed.files.length, fileCount);
+    });
+  });
 });

@@ -52,13 +52,19 @@ const REQUIRED_ENV_VARS = [
   "CALLBACK_SECRET",
 ] as const;
 
+// Optional environment variables (have fallbacks or are not always needed)
+const OPTIONAL_ENV_VARS = [
+  "EXPLORATION_CALLBACK_URL", // Falls back to SLACK_WEBHOOK_TRIGGER_URL GitHub secret
+] as const;
+
 describe("Environment Validation", () => {
   // Store original env values to restore after tests
   const originalEnv = new Map<string, string | undefined>();
+  const ALL_ENV_VARS = [...REQUIRED_ENV_VARS, ...OPTIONAL_ENV_VARS];
 
   beforeEach(() => {
     // Save original values
-    for (const varName of REQUIRED_ENV_VARS) {
+    for (const varName of ALL_ENV_VARS) {
       originalEnv.set(varName, Deno.env.get(varName));
     }
   });
@@ -77,7 +83,7 @@ describe("Environment Validation", () => {
 
   describe("validateEnvironment", () => {
     it("should return valid when all required vars are set", () => {
-      // Set all required vars
+      // Set all required vars (EXPLORATION_CALLBACK_URL is optional)
       Deno.env.set("ANTHROPIC_API_KEY", "sk-ant-test-key");
       Deno.env.set("GITHUB_TOKEN", "ghp_testtoken123");
       Deno.env.set("CALLBACK_SECRET", "test-callback-secret");
@@ -217,6 +223,24 @@ describe("Environment Validation", () => {
         REQUIRED_ENV_VARS.includes("CALLBACK_SECRET"),
         true,
         "CALLBACK_SECRET should be required for webhook validation",
+      );
+    });
+  });
+
+  describe("optional variables list", () => {
+    it("should list EXPLORATION_CALLBACK_URL as optional", () => {
+      assertEquals(
+        OPTIONAL_ENV_VARS.includes("EXPLORATION_CALLBACK_URL"),
+        true,
+        "EXPLORATION_CALLBACK_URL should be optional (falls back to GitHub secret)",
+      );
+    });
+
+    it("should NOT require EXPLORATION_CALLBACK_URL", () => {
+      assertEquals(
+        REQUIRED_ENV_VARS.includes("EXPLORATION_CALLBACK_URL" as typeof REQUIRED_ENV_VARS[number]),
+        false,
+        "EXPLORATION_CALLBACK_URL should not be in required list",
       );
     });
   });
