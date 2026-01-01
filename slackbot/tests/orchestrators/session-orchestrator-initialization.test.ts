@@ -19,6 +19,7 @@ describe("SessionOrchestrator - Async Initialization", () => {
   let anthropicClient: MockAnthropicClient;
   let messagingClient: MockSlackMessagingClient;
   let datastore: MockDatastoreClient;
+  let originalEnv: Map<string, string | undefined>;
 
   const createSlashCommand = (overrides?: Partial<SlashCommand>): SlashCommand => ({
     idea: "build a feature",
@@ -42,6 +43,10 @@ describe("SessionOrchestrator - Async Initialization", () => {
       anthropicClient,
       messagingClient,
     );
+
+    // Store original env values for EXPLORATION_CALLBACK_URL
+    originalEnv = new Map();
+    originalEnv.set("EXPLORATION_CALLBACK_URL", Deno.env.get("EXPLORATION_CALLBACK_URL"));
   });
 
   afterEach(() => {
@@ -49,6 +54,15 @@ describe("SessionOrchestrator - Async Initialization", () => {
     githubClient.clear();
     anthropicClient.clear();
     messagingClient.clear();
+
+    // Restore original env values
+    for (const [key, value] of originalEnv) {
+      if (value !== undefined) {
+        Deno.env.set(key, value);
+      } else {
+        Deno.env.delete(key);
+      }
+    }
   });
 
   describe("slash command with --repo flag", () => {
@@ -132,6 +146,119 @@ describe("SessionOrchestrator - Async Initialization", () => {
       // Only triggerExploration should be called
       const exploreDirectCalls = githubClient.getExploreRepositoryCalls();
       assertEquals(exploreDirectCalls.length, 0);
+    });
+
+    it("should pass EXPLORATION_CALLBACK_URL to triggerExploration when configured", async () => {
+      const command = createSlashCommand({ repository: "owner/repo" });
+      const threadTs = "1234567890.123456";
+      const testCallbackUrl = "https://hooks.slack.com/triggers/T123/456/secret";
+
+      // Set the callback URL environment variable
+      Deno.env.set("EXPLORATION_CALLBACK_URL", testCallbackUrl);
+
+      await orchestrator.handleSlashCommand(command, threadTs);
+
+      const calls = githubClient.getTriggerExplorationCalls();
+      assertEquals(calls.length, 1);
+      assertEquals(calls[0].callbackUrl, testCallbackUrl);
+    });
+
+    it("should pass undefined callbackUrl when EXPLORATION_CALLBACK_URL is not set", async () => {
+      const command = createSlashCommand({ repository: "owner/repo" });
+      const threadTs = "1234567890.123456";
+
+      // Ensure the callback URL is not set
+      Deno.env.delete("EXPLORATION_CALLBACK_URL");
+
+      await orchestrator.handleSlashCommand(command, threadTs);
+
+      const calls = githubClient.getTriggerExplorationCalls();
+      assertEquals(calls.length, 1);
+      assertEquals(calls[0].callbackUrl, undefined);
+    });
+
+    it("should treat empty string EXPLORATION_CALLBACK_URL as not configured", async () => {
+      const command = createSlashCommand({ repository: "owner/repo" });
+      const threadTs = "1234567890.123456";
+
+      // Set callback URL to empty string
+      Deno.env.set("EXPLORATION_CALLBACK_URL", "");
+
+      await orchestrator.handleSlashCommand(command, threadTs);
+
+      const calls = githubClient.getTriggerExplorationCalls();
+      assertEquals(calls.length, 1);
+      assertEquals(calls[0].callbackUrl, undefined);
+    });
+
+    it("should treat whitespace-only EXPLORATION_CALLBACK_URL as not configured", async () => {
+      const command = createSlashCommand({ repository: "owner/repo" });
+      const threadTs = "1234567890.123456";
+
+      // Set callback URL to whitespace only
+      Deno.env.set("EXPLORATION_CALLBACK_URL", "   ");
+
+      await orchestrator.handleSlashCommand(command, threadTs);
+
+      const calls = githubClient.getTriggerExplorationCalls();
+      assertEquals(calls.length, 1);
+      assertEquals(calls[0].callbackUrl, undefined);
+    });
+
+    it("should reject HTTP callback URLs with validation error", async () => {
+      const command = createSlashCommand({ repository: "owner/repo" });
+      const threadTs = "1234567890.123456";
+
+      // Set callback URL to HTTP (insecure)
+      Deno.env.set("EXPLORATION_CALLBACK_URL", "http://hooks.slack.com/triggers/T123/456/secret");
+
+      anthropicClient.setNextQuestionResponse({
+        question: "What problem are you trying to solve?",
+        confidence_score: 20,
+      });
+
+      await orchestrator.handleSlashCommand(command, threadTs);
+
+      // Should have posted an error message about HTTPS
+      const messages = messagingClient.getPostedMessages();
+      const httpsErrorMessage = messages.find((m) =>
+        m.text.toLowerCase().includes("https") ||
+        m.text.toLowerCase().includes("callback url")
+      );
+      assertExists(httpsErrorMessage);
+
+      // Should still transition to questioning phase and generate first question
+      const session = await sessionManager.loadSession(command.channelId, threadTs);
+      assertExists(session);
+      assertEquals(session.phase, Phase.Questioning);
+    });
+
+    it("should reject malformed callback URLs with validation error", async () => {
+      const command = createSlashCommand({ repository: "owner/repo" });
+      const threadTs = "1234567890.123456";
+
+      // Set callback URL to invalid format
+      Deno.env.set("EXPLORATION_CALLBACK_URL", "not-a-valid-url");
+
+      anthropicClient.setNextQuestionResponse({
+        question: "What problem are you trying to solve?",
+        confidence_score: 20,
+      });
+
+      await orchestrator.handleSlashCommand(command, threadTs);
+
+      // Should have posted an error message about invalid URL
+      const messages = messagingClient.getPostedMessages();
+      const invalidUrlMessage = messages.find((m) =>
+        m.text.toLowerCase().includes("invalid") ||
+        m.text.toLowerCase().includes("url")
+      );
+      assertExists(invalidUrlMessage);
+
+      // Should still transition to questioning phase and generate first question
+      const session = await sessionManager.loadSession(command.channelId, threadTs);
+      assertExists(session);
+      assertEquals(session.phase, Phase.Questioning);
     });
   });
 

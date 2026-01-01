@@ -18,6 +18,10 @@ on:
         description: 'Session ID for correlation (channel_id:thread_ts format)'
         required: true
         type: string
+      callback_url:
+        description: 'Webhook URL for exploration results callback (overrides SLACK_WEBHOOK_TRIGGER_URL secret)'
+        required: false
+        type: string
 
 # Prevent concurrent explorations for the same session
 concurrency:
@@ -35,6 +39,7 @@ jobs:
         env:
           TARGET_REPO: ${{ inputs.target_repo }}
           SESSION_ID: ${{ inputs.session_id }}
+          CALLBACK_URL_INPUT: ${{ inputs.callback_url }}
           SLACK_WEBHOOK_TRIGGER_URL: ${{ secrets.SLACK_WEBHOOK_TRIGGER_URL }}
         run: |
           # Validate target_repo format (owner/repo, alphanumeric with dots, dashes, underscores)
@@ -43,13 +48,20 @@ jobs:
             exit 1
           fi
 
-          # Validate SLACK_WEBHOOK_TRIGGER_URL is set and uses HTTPS
-          if [ -z "$SLACK_WEBHOOK_TRIGGER_URL" ]; then
-            echo "::error::SLACK_WEBHOOK_TRIGGER_URL secret is not set"
+          # Determine callback URL: prefer input over secret
+          if [ -n "$CALLBACK_URL_INPUT" ]; then
+            WEBHOOK_URL="$CALLBACK_URL_INPUT"
+          else
+            WEBHOOK_URL="$SLACK_WEBHOOK_TRIGGER_URL"
+          fi
+
+          # Validate callback URL is set and uses HTTPS
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "::error::Neither callback_url input nor SLACK_WEBHOOK_TRIGGER_URL secret is set"
             exit 1
           fi
-          if ! [[ "$SLACK_WEBHOOK_TRIGGER_URL" =~ ^https:// ]]; then
-            echo "::error::Invalid SLACK_WEBHOOK_TRIGGER_URL: must use HTTPS"
+          if ! [[ "$WEBHOOK_URL" =~ ^https:// ]]; then
+            echo "::error::Invalid callback URL: must use HTTPS"
             exit 1
           fi
 
@@ -145,11 +157,19 @@ jobs:
       - name: Parse and send success callback
         if: steps.explore.outcome == 'success'
         env:
+          CALLBACK_URL_INPUT: ${{ inputs.callback_url }}
           SLACK_WEBHOOK_TRIGGER_URL: ${{ secrets.SLACK_WEBHOOK_TRIGGER_URL }}
           SESSION_ID: ${{ inputs.session_id }}
           CHANNEL_ID: ${{ steps.validate.outputs.channel_id }}
           THREAD_TS: ${{ steps.validate.outputs.thread_ts }}
         run: |
+          # Determine callback URL: prefer input over secret
+          if [ -n "$CALLBACK_URL_INPUT" ]; then
+            WEBHOOK_URL="$CALLBACK_URL_INPUT"
+          else
+            WEBHOOK_URL="$SLACK_WEBHOOK_TRIGGER_URL"
+          fi
+
           # Read the exploration output
           EXPLORATION_OUTPUT=$(cat "$GITHUB_WORKSPACE/exploration_output.txt")
 
@@ -215,7 +235,7 @@ jobs:
           MAX_RETRIES=3
           for i in $(seq 1 $MAX_RETRIES); do
             # Store HTTP response code and body separately
-            HTTP_RESPONSE=$(curl -X POST "$SLACK_WEBHOOK_TRIGGER_URL" \
+            HTTP_RESPONSE=$(curl -X POST "$WEBHOOK_URL" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
               --silent --show-error --max-time 30 \
@@ -258,6 +278,7 @@ jobs:
       - name: Send error callback
         if: steps.clone.outcome == 'failure' || steps.install.outcome == 'failure' || steps.explore.outcome == 'failure'
         env:
+          CALLBACK_URL_INPUT: ${{ inputs.callback_url }}
           SLACK_WEBHOOK_TRIGGER_URL: ${{ secrets.SLACK_WEBHOOK_TRIGGER_URL }}
           SESSION_ID: ${{ inputs.session_id }}
           CHANNEL_ID: ${{ steps.validate.outputs.channel_id }}
@@ -268,6 +289,13 @@ jobs:
           INSTALL_ERROR: ${{ steps.install.outputs.install_error }}
           EXPLORE_ERROR: ${{ steps.explore.outputs.explore_error }}
         run: |
+          # Determine callback URL: prefer input over secret
+          if [ -n "$CALLBACK_URL_INPUT" ]; then
+            WEBHOOK_URL="$CALLBACK_URL_INPUT"
+          else
+            WEBHOOK_URL="$SLACK_WEBHOOK_TRIGGER_URL"
+          fi
+
           # Determine error message and code based on which step failed
           if [ "$CLONE_OUTCOME" == "failure" ]; then
             ERROR_MESSAGE="${CLONE_ERROR:-Failed to clone repository}"
@@ -312,7 +340,7 @@ jobs:
           MAX_RETRIES=3
           for i in $(seq 1 $MAX_RETRIES); do
             # Store HTTP response code and body separately
-            HTTP_RESPONSE=$(curl -X POST "$SLACK_WEBHOOK_TRIGGER_URL" \
+            HTTP_RESPONSE=$(curl -X POST "$WEBHOOK_URL" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
               --silent --show-error --max-time 30 \

@@ -133,8 +133,9 @@ export class SessionOrchestrator {
    * Posts a status message and triggers the exploration workflow.
    * Does not wait for exploration to complete - webhook will continue the flow.
    *
-   * The webhook URL is configured as SLACK_WEBHOOK_TRIGGER_URL secret in GitHub,
-   * not passed from ROSI.
+   * The callback URL is read from EXPLORATION_CALLBACK_URL environment variable
+   * and passed to the workflow. If not configured (or empty), the workflow will
+   * fall back to using the SLACK_WEBHOOK_TRIGGER_URL secret.
    *
    * @param command - Parsed slash command
    * @param threadTs - Thread timestamp
@@ -154,10 +155,21 @@ export class SessionOrchestrator {
     try {
       const sessionId = formatSessionId(command.channelId, threadTs);
 
+      // Read callback URL from environment - this is a secret, never log it
+      // Treat empty string as not configured (same as undefined)
+      const rawCallbackUrl = Deno.env.get("EXPLORATION_CALLBACK_URL");
+      const callbackUrl = rawCallbackUrl?.trim() || undefined;
+
+      // Validate URL format if provided
+      if (callbackUrl !== undefined) {
+        this.validateCallbackUrl(callbackUrl);
+      }
+
       await this.githubClient.triggerExploration(
         command.repository!,
         command.idea ?? "",
         sessionId,
+        callbackUrl,
       );
     } catch (error) {
       // Handle trigger failure gracefully - posts error message and continues without context
@@ -166,6 +178,36 @@ export class SessionOrchestrator {
       // Continue with questioning flow despite the error
       await this.transitionToQuestioningPhase(command.channelId, threadTs);
       await this.generateAndPostFirstQuestion(command, threadTs, null);
+    }
+  }
+
+  /**
+   * Validate callback URL format.
+   *
+   * Ensures the URL is a valid HTTPS URL to prevent workflow failures
+   * due to malformed or insecure URLs.
+   *
+   * @param url - The callback URL to validate
+   * @throws ValidationError if URL is malformed or not HTTPS
+   */
+  private validateCallbackUrl(url: string): void {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      throw new ValidationError(
+        "Invalid callback URL format",
+        "EXPLORATION_CALLBACK_URL is not a valid URL",
+        "Update EXPLORATION_CALLBACK_URL in environment with a valid HTTPS URL",
+      );
+    }
+
+    if (parsedUrl.protocol !== "https:") {
+      throw new ValidationError(
+        "Callback URL must use HTTPS",
+        "EXPLORATION_CALLBACK_URL must use https: protocol",
+        "Update EXPLORATION_CALLBACK_URL to use HTTPS protocol",
+      );
     }
   }
 
