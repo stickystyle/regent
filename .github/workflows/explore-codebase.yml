@@ -66,9 +66,9 @@ jobs:
           fi
 
           # Validate session_id is in channel_id:thread_ts format
-          # channel_id is alphanumeric with optional underscores
+          # channel_id is alphanumeric (Slack IDs are typically uppercase, but allow lowercase defensively)
           # thread_ts is a numeric timestamp with a dot (e.g., 1234567890.123456)
-          if ! [[ "$SESSION_ID" =~ ^[A-Z0-9]+:[0-9]+\.[0-9]+$ ]]; then
+          if ! [[ "$SESSION_ID" =~ ^[A-Za-z0-9]+:[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Invalid session_id format: must be 'channel_id:thread_ts' (e.g., C12345:1234567890.123456)"
             exit 1
           fi
@@ -228,52 +228,9 @@ jobs:
               exploration_data: $exploration_data
             }')
 
-          echo "Sending success callback to webhook..."
-
-          # Retry logic: attempt 1, if fails wait 5s, attempt 2, if fails wait 10s, attempt 3
-          # HTTP 000 indicates curl connection failure or timeout - treat as retryable
-          MAX_RETRIES=3
-          for i in $(seq 1 $MAX_RETRIES); do
-            # Store HTTP response code and body separately
-            HTTP_RESPONSE=$(curl -X POST "$WEBHOOK_URL" \
-              -H "Content-Type: application/json" \
-              -d "$PAYLOAD" \
-              --silent --show-error --max-time 30 \
-              -w "\n%{http_code}" 2>&1) || true
-
-            # Extract HTTP code (last line) and body (everything else)
-            HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -n1)
-            HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
-
-            # Check if we got a 2xx response (success)
-            if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
-              echo "Callback sent successfully (HTTP $HTTP_CODE)"
-              exit 0
-            fi
-
-            echo "Callback attempt $i failed (HTTP $HTTP_CODE)"
-
-            # Only retry on 5xx errors or network timeouts (empty HTTP_CODE or connection errors)
-            if [[ "$HTTP_CODE" =~ ^5[0-9][0-9]$ ]] || [ -z "$HTTP_CODE" ] || [ "$HTTP_CODE" == "000" ]; then
-              if [ "$i" -lt "$MAX_RETRIES" ]; then
-                # Determine retry delay: 5s after first failure, 10s after second
-                if [ "$i" -eq 1 ]; then
-                  RETRY_DELAY=5
-                else
-                  RETRY_DELAY=10
-                fi
-                echo "Retrying in ${RETRY_DELAY}s..."
-                sleep $RETRY_DELAY
-              fi
-            else
-              # 4xx errors are not retryable
-              echo "::error::Non-retryable error (HTTP $HTTP_CODE): $HTTP_BODY"
-              exit 1
-            fi
-          done
-
-          echo "::error::Failed to send success callback after $MAX_RETRIES attempts"
-          exit 1
+          # Source shared webhook retry function
+          source "$GITHUB_WORKSPACE/.github/scripts/send-webhook.sh"
+          send_webhook_with_retry "success"
 
       - name: Send error callback
         if: steps.clone.outcome == 'failure' || steps.install.outcome == 'failure' || steps.explore.outcome == 'failure'
@@ -333,48 +290,6 @@ jobs:
               exploration_data: $exploration_data
             }')
 
-          echo "Sending error callback to webhook..."
-
-          # Retry logic: attempt 1, if fails wait 5s, attempt 2, if fails wait 10s, attempt 3
-          # HTTP 000 indicates curl connection failure or timeout - treat as retryable
-          MAX_RETRIES=3
-          for i in $(seq 1 $MAX_RETRIES); do
-            # Store HTTP response code and body separately
-            HTTP_RESPONSE=$(curl -X POST "$WEBHOOK_URL" \
-              -H "Content-Type: application/json" \
-              -d "$PAYLOAD" \
-              --silent --show-error --max-time 30 \
-              -w "\n%{http_code}" 2>&1) || true
-
-            # Extract HTTP code (last line) and body (everything else)
-            HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -n1)
-            HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
-
-            # Check if we got a 2xx response (success)
-            if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
-              echo "Error callback sent successfully (HTTP $HTTP_CODE)"
-              exit 0
-            fi
-
-            echo "Callback attempt $i failed (HTTP $HTTP_CODE)"
-
-            # Only retry on 5xx errors or network timeouts (empty HTTP_CODE or connection errors)
-            if [[ "$HTTP_CODE" =~ ^5[0-9][0-9]$ ]] || [ -z "$HTTP_CODE" ] || [ "$HTTP_CODE" == "000" ]; then
-              if [ "$i" -lt "$MAX_RETRIES" ]; then
-                # Determine retry delay: 5s after first failure, 10s after second
-                if [ "$i" -eq 1 ]; then
-                  RETRY_DELAY=5
-                else
-                  RETRY_DELAY=10
-                fi
-                echo "Retrying in ${RETRY_DELAY}s..."
-                sleep $RETRY_DELAY
-              fi
-            else
-              # 4xx errors are not retryable
-              echo "::error::Non-retryable error (HTTP $HTTP_CODE): $HTTP_BODY"
-              exit 1
-            fi
-          done
-
-          echo "::warning::Failed to send error callback after $MAX_RETRIES attempts"
+          # Source shared webhook retry function
+          source "$GITHUB_WORKSPACE/.github/scripts/send-webhook.sh"
+          send_webhook_with_retry "error" || true  # Don't fail the job if error callback fails
