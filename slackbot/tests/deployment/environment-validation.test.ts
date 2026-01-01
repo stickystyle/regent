@@ -50,16 +50,21 @@ const REQUIRED_ENV_VARS = [
   "ANTHROPIC_API_KEY",
   "GITHUB_TOKEN",
   "CALLBACK_SECRET",
-  "EXPLORATION_CALLBACK_URL",
+] as const;
+
+// Optional environment variables (have fallbacks or are not always needed)
+const OPTIONAL_ENV_VARS = [
+  "EXPLORATION_CALLBACK_URL", // Falls back to SLACK_WEBHOOK_TRIGGER_URL GitHub secret
 ] as const;
 
 describe("Environment Validation", () => {
   // Store original env values to restore after tests
   const originalEnv = new Map<string, string | undefined>();
+  const ALL_ENV_VARS = [...REQUIRED_ENV_VARS, ...OPTIONAL_ENV_VARS];
 
   beforeEach(() => {
     // Save original values
-    for (const varName of REQUIRED_ENV_VARS) {
+    for (const varName of ALL_ENV_VARS) {
       originalEnv.set(varName, Deno.env.get(varName));
     }
   });
@@ -78,11 +83,10 @@ describe("Environment Validation", () => {
 
   describe("validateEnvironment", () => {
     it("should return valid when all required vars are set", () => {
-      // Set all required vars
+      // Set all required vars (EXPLORATION_CALLBACK_URL is optional)
       Deno.env.set("ANTHROPIC_API_KEY", "sk-ant-test-key");
       Deno.env.set("GITHUB_TOKEN", "ghp_testtoken123");
       Deno.env.set("CALLBACK_SECRET", "test-callback-secret");
-      Deno.env.set("EXPLORATION_CALLBACK_URL", "https://hooks.slack.com/triggers/T123/456/abc");
 
       const result = validateEnvironment(REQUIRED_ENV_VARS);
 
@@ -94,7 +98,6 @@ describe("Environment Validation", () => {
       Deno.env.delete("ANTHROPIC_API_KEY");
       Deno.env.set("GITHUB_TOKEN", "ghp_testtoken123");
       Deno.env.set("CALLBACK_SECRET", "test-callback-secret");
-      Deno.env.set("EXPLORATION_CALLBACK_URL", "https://hooks.slack.com/triggers/T123/456/abc");
 
       const result = validateEnvironment(REQUIRED_ENV_VARS);
 
@@ -106,7 +109,6 @@ describe("Environment Validation", () => {
       Deno.env.set("ANTHROPIC_API_KEY", "sk-ant-test-key");
       Deno.env.delete("GITHUB_TOKEN");
       Deno.env.set("CALLBACK_SECRET", "test-callback-secret");
-      Deno.env.set("EXPLORATION_CALLBACK_URL", "https://hooks.slack.com/triggers/T123/456/abc");
 
       const result = validateEnvironment(REQUIRED_ENV_VARS);
 
@@ -118,7 +120,6 @@ describe("Environment Validation", () => {
       Deno.env.set("ANTHROPIC_API_KEY", "sk-ant-test-key");
       Deno.env.set("GITHUB_TOKEN", "ghp_testtoken123");
       Deno.env.delete("CALLBACK_SECRET");
-      Deno.env.set("EXPLORATION_CALLBACK_URL", "https://hooks.slack.com/triggers/T123/456/abc");
 
       const result = validateEnvironment(REQUIRED_ENV_VARS);
 
@@ -126,23 +127,10 @@ describe("Environment Validation", () => {
       assertEquals(result.missing.includes("CALLBACK_SECRET"), true);
     });
 
-    it("should return invalid when EXPLORATION_CALLBACK_URL is missing", () => {
-      Deno.env.set("ANTHROPIC_API_KEY", "sk-ant-test-key");
-      Deno.env.set("GITHUB_TOKEN", "ghp_testtoken123");
-      Deno.env.set("CALLBACK_SECRET", "test-callback-secret");
-      Deno.env.delete("EXPLORATION_CALLBACK_URL");
-
-      const result = validateEnvironment(REQUIRED_ENV_VARS);
-
-      assertEquals(result.valid, false);
-      assertEquals(result.missing.includes("EXPLORATION_CALLBACK_URL"), true);
-    });
-
     it("should return all missing vars when multiple are missing", () => {
       Deno.env.delete("ANTHROPIC_API_KEY");
       Deno.env.delete("GITHUB_TOKEN");
       Deno.env.set("CALLBACK_SECRET", "test-callback-secret");
-      Deno.env.set("EXPLORATION_CALLBACK_URL", "https://hooks.slack.com/triggers/T123/456/abc");
 
       const result = validateEnvironment(REQUIRED_ENV_VARS);
 
@@ -156,7 +144,6 @@ describe("Environment Validation", () => {
       Deno.env.set("ANTHROPIC_API_KEY", "");
       Deno.env.set("GITHUB_TOKEN", "ghp_testtoken123");
       Deno.env.set("CALLBACK_SECRET", "test-callback-secret");
-      Deno.env.set("EXPLORATION_CALLBACK_URL", "https://hooks.slack.com/triggers/T123/456/abc");
 
       const result = validateEnvironment(REQUIRED_ENV_VARS);
 
@@ -168,7 +155,6 @@ describe("Environment Validation", () => {
       Deno.env.set("ANTHROPIC_API_KEY", "   ");
       Deno.env.set("GITHUB_TOKEN", "ghp_testtoken123");
       Deno.env.set("CALLBACK_SECRET", "test-callback-secret");
-      Deno.env.set("EXPLORATION_CALLBACK_URL", "https://hooks.slack.com/triggers/T123/456/abc");
 
       const result = validateEnvironment(REQUIRED_ENV_VARS);
 
@@ -182,7 +168,6 @@ describe("Environment Validation", () => {
       Deno.env.set("ANTHROPIC_API_KEY", "sk-ant-test-key");
       Deno.env.set("GITHUB_TOKEN", "ghp_testtoken123");
       Deno.env.set("CALLBACK_SECRET", "test-callback-secret");
-      Deno.env.set("EXPLORATION_CALLBACK_URL", "https://hooks.slack.com/triggers/T123/456/abc");
 
       // Should not throw
       assertEnvironmentValid(REQUIRED_ENV_VARS);
@@ -192,7 +177,6 @@ describe("Environment Validation", () => {
       Deno.env.delete("ANTHROPIC_API_KEY");
       Deno.env.delete("GITHUB_TOKEN");
       Deno.env.set("CALLBACK_SECRET", "test-callback-secret");
-      Deno.env.set("EXPLORATION_CALLBACK_URL", "https://hooks.slack.com/triggers/T123/456/abc");
 
       assertThrows(
         () => assertEnvironmentValid(REQUIRED_ENV_VARS),
@@ -205,7 +189,6 @@ describe("Environment Validation", () => {
       Deno.env.delete("ANTHROPIC_API_KEY");
       Deno.env.delete("GITHUB_TOKEN");
       Deno.env.set("CALLBACK_SECRET", "test-callback-secret");
-      Deno.env.set("EXPLORATION_CALLBACK_URL", "https://hooks.slack.com/triggers/T123/456/abc");
 
       try {
         assertEnvironmentValid(REQUIRED_ENV_VARS);
@@ -242,12 +225,22 @@ describe("Environment Validation", () => {
         "CALLBACK_SECRET should be required for webhook validation",
       );
     });
+  });
 
-    it("should require EXPLORATION_CALLBACK_URL", () => {
+  describe("optional variables list", () => {
+    it("should list EXPLORATION_CALLBACK_URL as optional", () => {
       assertEquals(
-        REQUIRED_ENV_VARS.includes("EXPLORATION_CALLBACK_URL"),
+        OPTIONAL_ENV_VARS.includes("EXPLORATION_CALLBACK_URL"),
         true,
-        "EXPLORATION_CALLBACK_URL should be required for repository exploration callbacks",
+        "EXPLORATION_CALLBACK_URL should be optional (falls back to GitHub secret)",
+      );
+    });
+
+    it("should NOT require EXPLORATION_CALLBACK_URL", () => {
+      assertEquals(
+        REQUIRED_ENV_VARS.includes("EXPLORATION_CALLBACK_URL" as typeof REQUIRED_ENV_VARS[number]),
+        false,
+        "EXPLORATION_CALLBACK_URL should not be in required list",
       );
     });
   });
