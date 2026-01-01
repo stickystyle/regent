@@ -120,6 +120,32 @@ export interface Session {
    * Example: '{"files":["src/index.ts"],"summaries":{"src/index.ts":"Entry point"}}'
    */
   exploration_data?: string;
+
+  /**
+   * JSON-serialized array of context messages (non-@regent thread discussions).
+   *
+   * Context messages are team discussions that occur in the thread but are not
+   * directed at the bot. They provide valuable context for Claude when responding
+   * to direct mentions.
+   *
+   * Format: JSON array of ContextMessage objects
+   * Example: '[{"sender":"U123","text":"use postgres","timestamp":"1234.5678"}]'
+   *
+   * This field is stored as a JSON string because Slack Datastore (DynamoDB)
+   * doesn't support complex nested arrays directly.
+   */
+  context_messages?: string;
+}
+
+/**
+ * Represents a context message stored in the session.
+ *
+ * Context messages are non-@regent messages that provide team discussion context.
+ */
+export interface ContextMessage {
+  sender: string;
+  text: string;
+  timestamp: string;
 }
 
 /**

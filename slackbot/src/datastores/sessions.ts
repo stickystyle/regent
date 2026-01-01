@@ -93,5 +93,13 @@ export const SessionsDatastore = DefineDatastore({
     exploration_data: {
       type: Schema.types.string,
     },
+    /**
+     * JSON-serialized array of context messages (non-@regent thread discussions).
+     * Context messages provide team discussion context for Claude.
+     * Format: '[{"sender":"U123","text":"use postgres","timestamp":"1234.5678"}]'
+     */
+    context_messages: {
+      type: Schema.types.string,
+    },
   },
 });

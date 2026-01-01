@@ -184,12 +184,15 @@ export function handleMessageEvent(
   }
 
   // Check for @regent mention
-  if (!isMentionCommand(parsed.text)) {
+  const isDirectMention = isMentionCommand(parsed.text);
+
+  if (!isDirectMention) {
     // Not a mention - store for context but don't respond
     const message: Message = {
       sender: parsed.userId,
       text: parsed.text,
       timestamp: parsed.timestamp,
+      isDirectMention: false,
     };
 
     return {
@@ -203,6 +206,7 @@ export function handleMessageEvent(
     sender: parsed.userId,
     text: parsed.text,
     timestamp: parsed.timestamp,
+    isDirectMention: true,
   };
 
   return {

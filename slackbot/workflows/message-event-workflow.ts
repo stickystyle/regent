@@ -1,8 +1,9 @@
 // ABOUTME: ROSI workflow for handling message and app_mention events.
-// ABOUTME: Routes thread messages and @regent mentions to MessageEventFunction.
+// ABOUTME: Routes thread messages and @regent mentions to MessageEventFunction, then stores context.
 
 import { DefineWorkflow, Schema } from "deno-slack-sdk/mod.ts";
 import { MessageEventFunction } from "../functions/message-event.ts";
+import { StoreContextMessageFunction } from "../functions/store-context-message.ts";
 
 /**
  * Message Event Workflow - Entry point for thread messages and @mentions.
@@ -53,8 +54,8 @@ export const MessageEventWorkflow = DefineWorkflow({
   },
 });
 
-// Add step for message event handling
-MessageEventWorkflow.addStep(
+// Step 1: Parse message and determine if bot should respond
+const messageEventStep = MessageEventWorkflow.addStep(
   MessageEventFunction,
   {
     type: MessageEventWorkflow.inputs.event_type,
@@ -64,6 +65,24 @@ MessageEventWorkflow.addStep(
     ts: MessageEventWorkflow.inputs.message_ts,
     thread_ts: MessageEventWorkflow.inputs.thread_ts,
     bot_id: MessageEventWorkflow.inputs.bot_id,
+  },
+);
+
+// Step 2: Store context message in session datastore
+// This step stores non-@regent messages for later inclusion in Claude's context.
+// The StoreContextMessageFunction gracefully handles cases where:
+// - is_direct_mention is true (skip storage - handled by orchestrator's MessageCache)
+// - session_id is undefined (message not in a thread)
+// - session doesn't exist (thread has no active brainstorm)
+// - data is missing (bot messages, etc.)
+MessageEventWorkflow.addStep(
+  StoreContextMessageFunction,
+  {
+    session_id: messageEventStep.outputs.session_id,
+    sender: messageEventStep.outputs.sender,
+    text: messageEventStep.outputs.message_text,
+    timestamp: messageEventStep.outputs.timestamp,
+    is_direct_mention: messageEventStep.outputs.is_direct_mention,
   },
 );
 

@@ -75,6 +75,14 @@ export const MessageEventFunction = DefineFunction({
         type: Schema.types.string,
         description: "Thread timestamp for session lookup",
       },
+      session_id: {
+        type: Schema.types.string,
+        description: "Session ID derived from channel_id:thread_ts for cache lookup",
+      },
+      is_direct_mention: {
+        type: Schema.types.boolean,
+        description: "Whether this message was a direct @regent mention",
+      },
       is_validation_error: {
         type: Schema.types.boolean,
         description: "Whether a validation error occurred",
@@ -106,6 +114,9 @@ export default SlackFunction(
       // Call existing handler (synchronous)
       const result = handleMessageEvent(slackInput);
 
+      // Generate session_id from channel:thread_ts for cache lookup
+      const sessionId = inputs.thread_ts ? `${inputs.channel}:${inputs.thread_ts}` : undefined;
+
       return {
         outputs: {
           should_respond: result.shouldRespond,
@@ -114,6 +125,8 @@ export default SlackFunction(
           timestamp: result.message?.timestamp,
           channel_id: inputs.channel,
           thread_ts: inputs.thread_ts,
+          session_id: sessionId,
+          is_direct_mention: result.message?.isDirectMention ?? false,
           is_validation_error: false,
         },
       };
@@ -121,11 +134,16 @@ export default SlackFunction(
       if (error instanceof ValidationError) {
         // Validation errors are expected for messages not in threads
         // Return should_respond: false with error context
+        // Generate session_id even for validation errors (may be undefined)
+        const sessionId = inputs.thread_ts ? `${inputs.channel}:${inputs.thread_ts}` : undefined;
+
         return {
           outputs: {
             should_respond: false,
             channel_id: inputs.channel,
             thread_ts: inputs.thread_ts,
+            session_id: sessionId,
+            is_direct_mention: false,
             is_validation_error: true,
             error_message: error.message,
           },

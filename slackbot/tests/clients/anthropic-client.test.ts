@@ -1561,5 +1561,240 @@ describe("AnthropicClient", () => {
         assertEquals(response.confidence_score >= 0 && response.confidence_score <= 100, true);
       });
     });
+
+    describe("Context message batching (formatMessages)", () => {
+      it("should batch consecutive context messages before direct mention", async () => {
+        let capturedBody: unknown = null;
+
+        const mockApi: MockAnthropicApi = {
+          post: async (_url: string, body: unknown, _headers?: Record<string, string>) => {
+            capturedBody = body;
+            return createMockResponse("Question? I'm 50% confident.");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          {
+            sender: "U1",
+            text: "I want to build a feature",
+            timestamp: "1",
+            isDirectMention: true,
+          },
+          { sender: "bot", text: "What kind of feature?", timestamp: "2" },
+          { sender: "U2", text: "should we use postgres?", timestamp: "3", isDirectMention: false },
+          {
+            sender: "U3",
+            text: "yes, we already have it in prod",
+            timestamp: "4",
+            isDirectMention: false,
+          },
+          {
+            sender: "U1",
+            text: "a user management feature",
+            timestamp: "5",
+            isDirectMention: true,
+          },
+        ];
+
+        await client.continueConversation(messages, null);
+
+        const body = capturedBody as Record<string, unknown>;
+        const apiMessages = body.messages as Array<{ role: string; content: string }>;
+
+        assertEquals(apiMessages.length, 3);
+        assertEquals(apiMessages[0].role, "user");
+        assertEquals(apiMessages[0].content, "I want to build a feature");
+        assertEquals(apiMessages[1].role, "assistant");
+        assertEquals(apiMessages[1].content, "What kind of feature?");
+        assertEquals(apiMessages[2].role, "user");
+        assertEquals(
+          apiMessages[2].content.includes("---THREAD DISCUSSION---"),
+          true,
+          "Should include thread discussion marker",
+        );
+        assertEquals(
+          apiMessages[2].content.includes("@U2: should we use postgres?"),
+          true,
+          "Should include first context message",
+        );
+        assertEquals(
+          apiMessages[2].content.includes("@U3: yes, we already have it in prod"),
+          true,
+          "Should include second context message",
+        );
+        assertEquals(
+          apiMessages[2].content.includes("---END DISCUSSION---"),
+          true,
+          "Should include end discussion marker",
+        );
+        assertEquals(
+          apiMessages[2].content.includes("a user management feature"),
+          true,
+          "Should include the direct message after discussion block",
+        );
+      });
+
+      it("should handle no context messages (existing behavior)", async () => {
+        let capturedBody: unknown = null;
+
+        const mockApi: MockAnthropicApi = {
+          post: async (_url: string, body: unknown, _headers?: Record<string, string>) => {
+            capturedBody = body;
+            return createMockResponse("Question? I'm 50% confident.");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U1", text: "idea", timestamp: "1", isDirectMention: true },
+          { sender: "bot", text: "question?", timestamp: "2" },
+          { sender: "U1", text: "answer", timestamp: "3", isDirectMention: true },
+        ];
+
+        await client.continueConversation(messages, null);
+
+        const body = capturedBody as Record<string, unknown>;
+        const apiMessages = body.messages as Array<{ role: string; content: string }>;
+
+        assertEquals(apiMessages.length, 3);
+        assertEquals(apiMessages[0].content, "idea");
+        assertEquals(apiMessages[1].content, "question?");
+        assertEquals(apiMessages[2].content, "answer");
+        assertEquals(apiMessages[2].content.includes("---THREAD DISCUSSION---"), false);
+      });
+
+      it("should handle messages without isDirectMention (backwards compatibility)", async () => {
+        let capturedBody: unknown = null;
+
+        const mockApi: MockAnthropicApi = {
+          post: async (_url: string, body: unknown, _headers?: Record<string, string>) => {
+            capturedBody = body;
+            return createMockResponse("Question? I'm 50% confident.");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U1", text: "old message without isDirectMention", timestamp: "1" },
+          { sender: "bot", text: "question?", timestamp: "2" },
+          { sender: "U1", text: "another old message", timestamp: "3" },
+        ];
+
+        await client.continueConversation(messages, null);
+
+        const body = capturedBody as Record<string, unknown>;
+        const apiMessages = body.messages as Array<{ role: string; content: string }>;
+
+        // Messages without isDirectMention should be treated as direct mentions for safety
+        assertEquals(apiMessages.length, 3);
+        assertEquals(apiMessages[0].content, "old message without isDirectMention");
+        assertEquals(apiMessages[2].content, "another old message");
+        assertEquals(apiMessages[2].content.includes("---THREAD DISCUSSION---"), false);
+      });
+
+      it("should flush pending context when bot message arrives", async () => {
+        let capturedBody: unknown = null;
+
+        const mockApi: MockAnthropicApi = {
+          post: async (_url: string, body: unknown, _headers?: Record<string, string>) => {
+            capturedBody = body;
+            return createMockResponse("Question? I'm 50% confident.");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U1", text: "initial request", timestamp: "1", isDirectMention: true },
+          { sender: "U2", text: "context before bot", timestamp: "2", isDirectMention: false },
+          { sender: "bot", text: "bot response", timestamp: "3" },
+          { sender: "U1", text: "next answer", timestamp: "4", isDirectMention: true },
+        ];
+
+        await client.continueConversation(messages, null);
+
+        const body = capturedBody as Record<string, unknown>;
+        const apiMessages = body.messages as Array<{ role: string; content: string }>;
+
+        // Context before bot message is discarded (bot message flushes pending context)
+        assertEquals(apiMessages.length, 3);
+        assertEquals(apiMessages[0].content, "initial request");
+        assertEquals(apiMessages[1].content, "bot response");
+        assertEquals(apiMessages[2].content, "next answer");
+        assertEquals(apiMessages[2].content.includes("---THREAD DISCUSSION---"), false);
+      });
+
+      it("should batch multiple context messages into single block", async () => {
+        let capturedBody: unknown = null;
+
+        const mockApi: MockAnthropicApi = {
+          post: async (_url: string, body: unknown, _headers?: Record<string, string>) => {
+            capturedBody = body;
+            return createMockResponse("Question? I'm 50% confident.");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          { sender: "U1", text: "start", timestamp: "1", isDirectMention: true },
+          { sender: "bot", text: "question", timestamp: "2" },
+          { sender: "U2", text: "context 1", timestamp: "3", isDirectMention: false },
+          { sender: "U3", text: "context 2", timestamp: "4", isDirectMention: false },
+          { sender: "U4", text: "context 3", timestamp: "5", isDirectMention: false },
+          { sender: "U1", text: "direct answer", timestamp: "6", isDirectMention: true },
+        ];
+
+        await client.continueConversation(messages, null);
+
+        const body = capturedBody as Record<string, unknown>;
+        const apiMessages = body.messages as Array<{ role: string; content: string }>;
+        const lastUserMessage = apiMessages[2].content;
+
+        // All three context messages should be in a single block
+        assertEquals(lastUserMessage.includes("@U2: context 1"), true);
+        assertEquals(lastUserMessage.includes("@U3: context 2"), true);
+        assertEquals(lastUserMessage.includes("@U4: context 3"), true);
+        // Followed by the direct message
+        assertEquals(lastUserMessage.includes("direct answer"), true);
+      });
+
+      it("should preserve attachment content in direct mention messages", async () => {
+        let capturedBody: unknown = null;
+
+        const mockApi: MockAnthropicApi = {
+          post: async (_url: string, body: unknown, _headers?: Record<string, string>) => {
+            capturedBody = body;
+            return createMockResponse("Question? I'm 50% confident.");
+          },
+        };
+
+        const client = new AnthropicClientImpl(mockApi, "test-api-key");
+        const messages: Message[] = [
+          {
+            sender: "U1",
+            text: "Here is a file",
+            timestamp: "1",
+            isDirectMention: true,
+            attachments: [
+              {
+                file_id: "F123",
+                filename: "spec.md",
+                mimetype: "text/markdown",
+                content: "# Spec Content",
+              },
+            ],
+          },
+        ];
+
+        await client.continueConversation(messages, null);
+
+        const body = capturedBody as Record<string, unknown>;
+        const apiMessages = body.messages as Array<{ role: string; content: string }>;
+
+        assertEquals(apiMessages[0].content.includes("Here is a file"), true);
+        assertEquals(apiMessages[0].content.includes("spec.md"), true);
+        assertEquals(apiMessages[0].content.includes("# Spec Content"), true);
+      });
+    });
   });
 });

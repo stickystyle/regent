@@ -334,4 +334,87 @@ describe("Message Type", () => {
       assertEquals(message.text, "");
     });
   });
+
+  describe("isDirectMention field", () => {
+    it("should support isDirectMention true for @regent messages", () => {
+      const message: Message = {
+        sender: "U1234567890",
+        text: "@regent This is my answer",
+        timestamp: "1234567890.123456",
+        isDirectMention: true,
+      };
+
+      assertEquals(message.isDirectMention, true);
+    });
+
+    it("should support isDirectMention false for ambient context messages", () => {
+      const message: Message = {
+        sender: "U1234567890",
+        text: "Just a discussion message",
+        timestamp: "1234567890.123456",
+        isDirectMention: false,
+      };
+
+      assertEquals(message.isDirectMention, false);
+    });
+
+    it("should allow isDirectMention to be undefined for backwards compatibility", () => {
+      const message: Message = {
+        sender: "U1234567890",
+        text: "@regent Old message without the field",
+        timestamp: "1234567890.123456",
+      };
+
+      assertEquals(message.isDirectMention, undefined);
+    });
+
+    it("should distinguish directed vs ambient messages", () => {
+      const directedMessage: Message = {
+        sender: "U1234567890",
+        text: "@regent We need a database",
+        timestamp: "1234567890.123456",
+        isDirectMention: true,
+      };
+
+      const ambientMessage: Message = {
+        sender: "U9876543210",
+        text: "Should we use PostgreSQL?",
+        timestamp: "1234567890.123457",
+        isDirectMention: false,
+      };
+
+      assertEquals(directedMessage.isDirectMention, true);
+      assertEquals(ambientMessage.isDirectMention, false);
+    });
+
+    it("should support bot messages without isDirectMention", () => {
+      const botMessage: Message = {
+        sender: "bot",
+        text: "What problem are you solving?",
+        timestamp: "1234567890.123456",
+      };
+
+      assertEquals(botMessage.isDirectMention, undefined);
+    });
+
+    it("should preserve isDirectMention alongside attachments", () => {
+      const message: Message = {
+        sender: "U1234567890",
+        text: "@regent Here is the spec",
+        timestamp: "1234567890.123456",
+        isDirectMention: true,
+        attachments: [
+          {
+            file_id: "F1234567890",
+            filename: "spec.md",
+            mimetype: "text/markdown",
+            content: "# Spec",
+          },
+        ],
+      };
+
+      assertEquals(message.isDirectMention, true);
+      assertEquals(message.attachments?.length, 1);
+    });
+  });
 });

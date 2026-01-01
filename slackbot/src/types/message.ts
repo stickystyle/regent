@@ -70,6 +70,18 @@ export interface Message {
   timestamp: string;
 
   /**
+   * Whether this message is a direct @regent mention.
+   *
+   * - true: Message is directed at the bot (e.g., "@regent answer")
+   * - false: Message is ambient context (team discussion without @regent)
+   * - undefined: Legacy message without this field (treated as true for safety)
+   *
+   * When formatting for the LLM, ambient context messages are batched together
+   * and prepended to the next direct mention in a THREAD DISCUSSION block.
+   */
+  isDirectMention?: boolean;
+
+  /**
    * Optional list of processed file attachments.
    *
    * Attachments provide additional context for the brainstorming session.

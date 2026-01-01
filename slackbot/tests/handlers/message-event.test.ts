@@ -394,3 +394,111 @@ describe("Property: Conversational Intent Detection", () => {
     assertEquals(result.message?.timestamp, "1234567890.123456");
   });
 });
+
+describe("isDirectMention field", () => {
+  it("should set isDirectMention true for @regent messages", () => {
+    const input: SlackMessageEventInput = {
+      type: "app_mention",
+      user: "U1234567890",
+      text: "<@U0BOTID> @regent This is my answer",
+      ts: "1234567890.123456",
+      channel: "C1234567890",
+      thread_ts: "1234567880.123456",
+    };
+
+    const result = handleMessageEvent(input);
+
+    assertEquals(result.message?.isDirectMention, true);
+  });
+
+  it("should set isDirectMention false for non-@regent messages", () => {
+    const input: SlackMessageEventInput = {
+      type: "message",
+      user: "U1234567890",
+      text: "Just a discussion comment",
+      ts: "1234567890.123456",
+      channel: "C1234567890",
+      thread_ts: "1234567880.123456",
+    };
+
+    const result = handleMessageEvent(input);
+
+    assertEquals(result.message?.isDirectMention, false);
+  });
+
+  it("should set isDirectMention true for direct @regent prefix", () => {
+    const input: SlackMessageEventInput = {
+      type: "message",
+      user: "U1234567890",
+      text: "@regent answer to question",
+      ts: "1234567890.123456",
+      channel: "C1234567890",
+      thread_ts: "1234567880.123456",
+    };
+
+    const result = handleMessageEvent(input);
+
+    assertEquals(result.shouldRespond, true);
+    assertEquals(result.message?.isDirectMention, true);
+  });
+
+  it("should set isDirectMention false for ambient team discussion", () => {
+    const input: SlackMessageEventInput = {
+      type: "message",
+      user: "U9876543210",
+      text: "I think we should use PostgreSQL for this",
+      ts: "1234567890.123456",
+      channel: "C1234567890",
+      thread_ts: "1234567880.123456",
+    };
+
+    const result = handleMessageEvent(input);
+
+    assertEquals(result.shouldRespond, false);
+    assertEquals(result.message?.isDirectMention, false);
+  });
+
+  it("should differentiate directed and ambient messages by isDirectMention", () => {
+    const directedInput: SlackMessageEventInput = {
+      type: "app_mention",
+      user: "U1234567890",
+      text: "<@U0BOTID> @regent We need a database",
+      ts: "1234567890.123456",
+      channel: "C1234567890",
+      thread_ts: "1234567880.123456",
+    };
+
+    const ambientInput: SlackMessageEventInput = {
+      type: "message",
+      user: "U9876543210",
+      text: "PostgreSQL would be a good choice",
+      ts: "1234567890.123457",
+      channel: "C1234567890",
+      thread_ts: "1234567880.123456",
+    };
+
+    const directedResult = handleMessageEvent(directedInput);
+    const ambientResult = handleMessageEvent(ambientInput);
+
+    assertEquals(directedResult.message?.isDirectMention, true);
+    assertEquals(directedResult.shouldRespond, true);
+    assertEquals(ambientResult.message?.isDirectMention, false);
+    assertEquals(ambientResult.shouldRespond, false);
+  });
+
+  it("should not set isDirectMention for bot messages (no message returned)", () => {
+    const input: SlackMessageEventInput = {
+      type: "message",
+      bot_id: "B1234567890",
+      text: "Bot question here",
+      ts: "1234567890.123456",
+      channel: "C1234567890",
+      thread_ts: "1234567880.123456",
+    };
+
+    const result = handleMessageEvent(input);
+
+    assertEquals(result.shouldRespond, false);
+    assertEquals(result.message, undefined);
+  });
+});

@@ -511,7 +511,34 @@ At the end of each response, include your confidence assessment:
 "I'm X% confident we have enough detail to create the spec."
 
 Start at low confidence (20-40%) and increase as you gather more detail.
-When you reach 95% or higher, the spec is ready for review.`;
+When you reach 95% or higher, the spec is ready for review.
+
+MESSAGE FORMAT:
+
+Messages come in two forms:
+
+1. DIRECT MESSAGES (no prefix, or after ---END DISCUSSION---)
+   - The user is addressing you directly
+   - They may be answering your question, asking for clarification,
+     giving you a command, or providing new information
+   - You should respond to these
+
+2. THREAD CONTEXT (marked with ---THREAD DISCUSSION---)
+   - Team members discussing among themselves
+   - Important context to factor into your understanding
+   - Do NOT respond to these directly, but DO incorporate
+     relevant information into your mental model
+
+Example:
+  ---THREAD DISCUSSION---
+  @alice: should we use PostgreSQL or MongoDB?
+  @bob: PostgreSQL, we already have it in prod
+  ---END DISCUSSION---
+
+  We want the feature to support bulk imports
+
+Here, the direct message is about bulk imports. But you now know they've
+decided on PostgreSQL - factor that into technical questions.`;
 
     if (repoContext) {
       const contextSection = `
@@ -584,16 +611,48 @@ RULES:
   /**
    * Convert Message array to Anthropic API messages format.
    *
-   * Includes attachment content when present, appending it to the message text.
+   * Handles three types of messages:
+   * - Bot messages (role: "assistant") - passed through directly
+   * - Direct mention messages (isDirectMention: true) - become user messages
+   * - Ambient context messages (isDirectMention: false) - batched and prepended
+   *   to the next direct mention in a THREAD DISCUSSION block
+   *
+   * Messages without isDirectMention field are treated as direct mentions
+   * for backwards compatibility.
    *
    * @param messages - Array of Message objects
    * @returns Array of Anthropic API message objects
    */
   private formatMessages(messages: Message[]): Array<{ role: string; content: string }> {
-    return messages.map((msg) => ({
-      role: msg.sender === "bot" ? "assistant" : "user",
-      content: this.formatMessageContent(msg),
-    }));
+    const result: Array<{ role: string; content: string }> = [];
+    let pendingContext: Message[] = [];
+
+    for (const msg of messages) {
+      if (msg.sender === "bot") {
+        // Bot messages go straight through, flush any pending context
+        result.push({ role: "assistant", content: this.formatMessageContent(msg) });
+        pendingContext = [];
+      } else if (msg.isDirectMention === false) {
+        // Ambient context - accumulate until next direct mention or bot message
+        pendingContext.push(msg);
+      } else {
+        // Direct mention (or legacy message without isDirectMention) - bundle pending context
+        let content = "";
+        if (pendingContext.length > 0) {
+          content += "---THREAD DISCUSSION---\n";
+          content += pendingContext.map((m) => `@${m.sender}: ${m.text}`).join("\n");
+          content += "\n---END DISCUSSION---\n\n";
+          pendingContext = [];
+        }
+        content += this.formatMessageContent(msg);
+        result.push({ role: "user", content });
+      }
+    }
+
+    // Trailing context (rare - would mean context after last @regent with no response yet)
+    // This gets included in the next API call when user sends @regent
+
+    return result;
   }
 
   /**

@@ -107,3 +107,87 @@ export class MockDatastoreClient implements DatastoreClient {
     this.store.clear();
   }
 }
+
+/**
+ * Slack API client interface for datastore operations.
+ *
+ * This interface represents the subset of the Slack API client used for
+ * datastore operations. It's defined here to avoid importing the full
+ * Slack SDK types.
+ */
+export interface SlackAppsDatastore {
+  get<T>(params: {
+    datastore: string;
+    id: string;
+  }): Promise<{ ok: boolean; item?: T; error?: string }>;
+
+  put<T>(params: {
+    datastore: string;
+    item: T;
+  }): Promise<{ ok: boolean; item?: T; error?: string }>;
+
+  delete(params: {
+    datastore: string;
+    id: string;
+  }): Promise<{ ok: boolean; error?: string }>;
+}
+
+/**
+ * SlackDatastoreClient wraps the Slack API client's datastore methods.
+ *
+ * This adapter implements the DatastoreClient interface by delegating to
+ * the real Slack API client. Used in ROSI functions where the Slack client
+ * is provided as a dependency.
+ */
+export class SlackDatastoreClient implements DatastoreClient {
+  private static readonly DATASTORE_NAME = "sessions";
+  private appsDatastore: SlackAppsDatastore;
+
+  /**
+   * Create a SlackDatastoreClient.
+   *
+   * @param appsDatastore - The Slack API client's apps.datastore object
+   */
+  constructor(appsDatastore: SlackAppsDatastore) {
+    this.appsDatastore = appsDatastore;
+  }
+
+  async put(session: Session): Promise<DatastoreResponse<Session>> {
+    const response = await this.appsDatastore.put<Session>({
+      datastore: SlackDatastoreClient.DATASTORE_NAME,
+      item: session,
+    });
+
+    if (!response.ok) {
+      return { ok: false, error: response.error };
+    }
+
+    return { ok: true, item: session };
+  }
+
+  async get(sessionId: string): Promise<DatastoreResponse<Session>> {
+    const response = await this.appsDatastore.get<Session>({
+      datastore: SlackDatastoreClient.DATASTORE_NAME,
+      id: sessionId,
+    });
+
+    if (!response.ok) {
+      return { ok: false, error: response.error };
+    }
+
+    return { ok: true, item: response.item };
+  }
+
+  async delete(sessionId: string): Promise<DatastoreResponse<void>> {
+    const response = await this.appsDatastore.delete({
+      datastore: SlackDatastoreClient.DATASTORE_NAME,
+      id: sessionId,
+    });
+
+    if (!response.ok) {
+      return { ok: false, error: response.error };
+    }
+
+    return { ok: true };
+  }
+}
