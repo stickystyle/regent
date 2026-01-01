@@ -8,6 +8,7 @@ import { MockGitHubClient } from "../../src/clients/github-client.ts";
 import { MockSlackMessagingClient } from "../../src/clients/messaging-client.ts";
 import { MockCanvasManager } from "../../src/managers/canvas-manager.ts";
 import { MockDatastoreClient } from "../../src/managers/datastore-client.ts";
+import { MockEpicManager } from "../../src/managers/epic-manager.ts";
 import { MessageCache } from "../../src/managers/message-cache.ts";
 import { SessionManager } from "../../src/managers/session-manager.ts";
 import { SessionOrchestrator } from "../../src/orchestrators/session-orchestrator.ts";
@@ -418,6 +419,7 @@ describe("Approval Intent Detection with Negation", () => {
   let anthropicClient: MockAnthropicClient;
   let messagingClient: MockSlackMessagingClient;
   let canvasManager: MockCanvasManager;
+  let epicManager: MockEpicManager;
   let messageCache: MessageCache;
   let datastore: MockDatastoreClient;
 
@@ -429,6 +431,7 @@ describe("Approval Intent Detection with Negation", () => {
     anthropicClient = new MockAnthropicClient();
     messagingClient = new MockSlackMessagingClient();
     canvasManager = new MockCanvasManager();
+    epicManager = new MockEpicManager();
 
     orchestrator = new SessionOrchestrator(
       sessionManager,
@@ -437,6 +440,7 @@ describe("Approval Intent Detection with Negation", () => {
       messagingClient,
       messageCache,
       canvasManager,
+      epicManager,
     );
   });
 
@@ -446,6 +450,7 @@ describe("Approval Intent Detection with Negation", () => {
     anthropicClient.clear();
     messagingClient.clear();
     canvasManager.clear();
+    epicManager.clear();
     messageCache.clear();
   });
 
@@ -530,8 +535,8 @@ describe("Approval Intent Detection with Negation", () => {
   });
 
   it("should detect approval when no negation is present", async () => {
-    // Arrange
-    const session = createReviewSession();
+    // Arrange: Session needs repository for full approval flow
+    const session = createReviewSession({ repository: "owner/repo" });
     await datastore.put(session);
 
     canvasManager.setCanvasContent(
@@ -557,7 +562,8 @@ describe("Approval Intent Detection with Negation", () => {
 
   it("should detect approval when 'know' contains 'no' substring", async () => {
     // Arrange: This tests that "no" inside "know" does NOT cause false negative
-    const session = createReviewSession();
+    // Session needs repository for full approval flow
+    const session = createReviewSession({ repository: "owner/repo" });
     await datastore.put(session);
 
     canvasManager.setCanvasContent(
