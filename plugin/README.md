@@ -7,15 +7,24 @@ Regent brings structured software development directly into Claude Code, guiding
 ## Installation
 
 ```bash
-# Install from the Regent repository
-claude plugin install regent
+# Add the marketplace
+/plugin marketplace add stickystyle/regent
+
+# Install the plugin
+/plugin install regent@stickystyle-regent
 ```
 
-Or for local development:
+For local development, add the local directory as a marketplace:
 
 ```bash
-claude --plugin-dir /path/to/regent
+# Add local marketplace (run inside Claude Code)
+/plugin marketplace add /path/to/regent
+
+# Install from local marketplace
+/plugin install regent@regent-plugins
 ```
+
+This installs through the normal plugin system, allowing testing alongside other plugins.
 
 ## Quick Start
 

@@ -52,9 +52,13 @@ Start a brainstorm in Slack with `/brainstorm --huddle --repo acme/api`. Regent 
 /regent:brainstorm
 ```
 
-For local development, run Claude Code with the plugin directory:
+For local development, add the local directory as a marketplace:
 ```bash
-claude --plugin-dir /path/to/regent
+# Add local marketplace (run inside Claude Code)
+/plugin marketplace add /path/to/regent
+
+# Install from local marketplace
+/plugin install regent@regent-plugins
 ```
 
 See [plugin/README.md](./plugin/README.md) for full documentation.
