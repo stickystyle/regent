@@ -7,6 +7,26 @@
   },
   "license": "AGPL-3.0",
   "keywords": ["spec-driven", "tdd", "workflow", "development"],
-  "commands": ["./plugin/commands/"],
-  "agents": ["./plugin/agents/"]
+  "commands": [
+    "./plugin/commands/brainstorm.md",
+    "./plugin/commands/design.md",
+    "./plugin/commands/execute-epic.md",
+    "./plugin/commands/execute-issue.md",
+    "./plugin/commands/execute.md",
+    "./plugin/commands/init.md",
+    "./plugin/commands/plan.md",
+    "./plugin/commands/specify.md"
+  ],
+  "agents": [
+    "./plugin/agents/regent-brainstorm-writer.md",
+    "./plugin/agents/regent-cdk-architect.md",
+    "./plugin/agents/regent-code-reviewer.md",
+    "./plugin/agents/regent-design-writer.md",
+    "./plugin/agents/regent-engineer.md",
+    "./plugin/agents/regent-python-engineer.md",
+    "./plugin/agents/regent-requirements-writer.md",
+    "./plugin/agents/regent-spec-validator.md",
+    "./plugin/agents/regent-tasks-writer.md",
+    "./plugin/agents/regent-typescript-engineer.md"
+  ]
 }
